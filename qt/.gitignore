@@ -1,0 +1,6 @@
+build/
+dist/
+*.user
+*.suo
+tests/test_host_key
+tests/*.log

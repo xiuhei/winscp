@@ -1,33 +1,14 @@
-[WinSCP](https://winscp.net/) is a popular free file manager for Windows supporting SFTP, FTP, FTPS, SCP, S3, WebDAV and local-to-local file transfers. A powerful tool to enhance your productivity with a user-friendly interface and automation options like .NET assembly or batch file scripting. Use WinSCP also for file editing, directory synchronization and site management. WinSCP is open-source and well documented. It is available in English and many other languages.
+# WinSCP 工作区
 
-To build WinSCP you need:
-- [Embarcadero C++Builder 11 Professional](https://www.embarcadero.com/products/cbuilder).
-- [Build Tools and Agents for Visual Studio 2022](https://visualstudio.microsoft.com/downloads/) (for C# 9.0)
-- [nasm](https://www.nasm.us/) (store it to `buildtools/tools/nasm.exe`)
-- [Object file converter](https://www.agner.org/optimize/#objconv) (store it to `buildtools/tools/objconv.exe`)
+当前桌面程序使用 `qt/` 中的 C++20 / Qt 6 实现。连接 SSH 服务器后，双栏文件管理与底部交互终端自动打开，并复用同一个 SSH 连接。程序不包含官方网站、更新检查、广告、捐赠、遥测或作者介绍入口。
 
-To build WinSCP from source by yourself, modify and use [`build.bat`](build.bat) in root folder.
+- [功能、构建与使用](qt/README.md)
+- [功能精简清单与已知未生效配置](qt/FEATURE_REVIEW.md)
 
-Directory structure:
+```powershell
+.\qt\scripts\build.ps1 -Configuration Debug
+.\qt\tests\run_integration_tests.ps1 -Configuration Debug
+.\qt\scripts\deploy.ps1
+```
 
-    /source             project files of all native libraries and executables
-    /source/components  native WinSCP visual components
-    /source/console     console interface
-    /source/core        core (non-visual) part of WinSCP
-                        (SSH, SFTP, FTP, WebDAV, S3 and SCP code)
-    /source/dragext     drag&drop shell extension
-    /source/filezilla   source code of FileZilla FTP client
-    /source/forms       visual part of WinSCP (dialogs and windows)
-    /source/packages    general visual components (both mine and 3rd party)
-    /source/putty       source code of PuTTY SSH client
-    /source/resource    resources strings
-    /source/windows     other sources
-    /deployment         Inno Setup script to create setup package
-                        (see /deployment/readme)
-    /dotnet             source code of WinSCP .NET assembly
-    /libs               3rd party libraries
-    /translations       translations of WinSCP strings
-
-See the file [`license.txt`](license.txt) for the license conditions.
-
-[![NuGet](https://img.shields.io/nuget/v/WinSCP.svg)](https://www.nuget.org/packages/WinSCP/)
+发布包生成在 `qt/dist/`。原版 WinSCP 的 `source/`、`libs/`、`deployment/`、`dotnet/`、`translations/` 和根目录 `build.bat` 独立保留，不参与 Qt 构建。原版许可见 `license.txt`，Qt 实现许可见 `qt/LICENSE`。
