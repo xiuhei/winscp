@@ -5,21 +5,15 @@
 #include <QFont>
 #include <QPalette>
 #include <QStyleFactory>
+#include <QStringList>
 
 #include <array>
 
 namespace wsc {
 
 namespace {
-QString g_currentTheme = QStringLiteral("dark");
-bool g_isDark = true;
-
-QColor blend(const QColor &first, const QColor &second, qreal factor)
-{
-    return QColor::fromRgbF(first.redF() * (1.0 - factor) + second.redF() * factor,
-                            first.greenF() * (1.0 - factor) + second.greenF() * factor,
-                            first.blueF() * (1.0 - factor) + second.blueF() * factor);
-}
+QString g_currentTheme = QStringLiteral("light");
+bool g_isDark = false;
 } // namespace
 
 QColor TerminalPalette::ansiColor(int index, bool bold) const
@@ -61,12 +55,14 @@ QString Theme::styleSheet(const QString &name)
 
 void Theme::apply(const QString &name)
 {
-    g_currentTheme = (name == QLatin1String("light")) ? QStringLiteral("light")
-                                                       : QStringLiteral("dark");
+    g_currentTheme = (name == QLatin1String("dark")) ? QStringLiteral("dark")
+                                                      : QStringLiteral("light");
     g_isDark = g_currentTheme == QLatin1String("dark");
 
     if (auto *app = qobject_cast<QApplication *>(QCoreApplication::instance())) {
-        app->setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+        auto *style = QStyleFactory::create(g_isDark ? QStringLiteral("Fusion")
+                                                     : QStringLiteral("windowsvista"));
+        app->setStyle(style ? style : QStyleFactory::create(QStringLiteral("Fusion")));
 
         QPalette palette;
         if (g_isDark) {
@@ -89,15 +85,15 @@ void Theme::apply(const QString &name)
             palette.setColor(QPalette::Disabled, QPalette::WindowText,
                              QColor(QStringLiteral("#5f6b7c")));
         } else {
-            palette.setColor(QPalette::Window, QColor(QStringLiteral("#f4f6f9")));
-            palette.setColor(QPalette::WindowText, QColor(QStringLiteral("#24303f")));
+            palette.setColor(QPalette::Window, QColor(QStringLiteral("#f0f0f0")));
+            palette.setColor(QPalette::WindowText, QColor(QStringLiteral("#000000")));
             palette.setColor(QPalette::Base, QColor(QStringLiteral("#ffffff")));
-            palette.setColor(QPalette::AlternateBase, QColor(QStringLiteral("#f7f9fc")));
-            palette.setColor(QPalette::Text, QColor(QStringLiteral("#24303f")));
-            palette.setColor(QPalette::Button, QColor(QStringLiteral("#ffffff")));
-            palette.setColor(QPalette::ButtonText, QColor(QStringLiteral("#24303f")));
-            palette.setColor(QPalette::Highlight, QColor(QStringLiteral("#cfe3fa")));
-            palette.setColor(QPalette::HighlightedText, QColor(QStringLiteral("#10243a")));
+            palette.setColor(QPalette::AlternateBase, QColor(QStringLiteral("#ffffff")));
+            palette.setColor(QPalette::Text, QColor(QStringLiteral("#000000")));
+            palette.setColor(QPalette::Button, QColor(QStringLiteral("#f0f0f0")));
+            palette.setColor(QPalette::ButtonText, QColor(QStringLiteral("#000000")));
+            palette.setColor(QPalette::Highlight, QColor(QStringLiteral("#0078d7")));
+            palette.setColor(QPalette::HighlightedText, QColor(QStringLiteral("#ffffff")));
             palette.setColor(QPalette::ToolTipBase, QColor(QStringLiteral("#ffffff")));
             palette.setColor(QPalette::ToolTipText, QColor(QStringLiteral("#24303f")));
             palette.setColor(QPalette::PlaceholderText, QColor(QStringLiteral("#98a3b0")));
@@ -108,8 +104,9 @@ void Theme::apply(const QString &name)
         app->setStyleSheet(styleSheet(g_currentTheme));
 
         QFont font = app->font();
-        font.setFamily(QStringLiteral("Segoe UI"));
-        font.setPointSize(10);
+        font.setFamilies({QStringLiteral("Segoe UI"), QStringLiteral("Microsoft YaHei UI"),
+                          QStringLiteral("Microsoft YaHei")});
+        font.setPointSize(9);
         font.setStyleHint(QFont::SansSerif);
         app->setFont(font);
     }
@@ -127,12 +124,12 @@ bool Theme::isDark()
 
 QColor Theme::accent()
 {
-    return g_isDark ? QColor(QStringLiteral("#e0821c")) : QColor(QStringLiteral("#d97913"));
+    return g_isDark ? QColor(QStringLiteral("#75a7d3")) : QColor(QStringLiteral("#0066b8"));
 }
 
 QColor Theme::text()
 {
-    return g_isDark ? QColor(QStringLiteral("#d7deea")) : QColor(QStringLiteral("#24303f"));
+    return g_isDark ? QColor(QStringLiteral("#d7deea")) : QColor(QStringLiteral("#000000"));
 }
 
 QColor Theme::muted()
@@ -162,12 +159,12 @@ QColor Theme::paneBackground()
 
 QColor Theme::terminalBackground()
 {
-    return g_isDark ? QColor(QStringLiteral("#0e1116")) : QColor(QStringLiteral("#fbfcfe"));
+    return QColor(QStringLiteral("#000000"));
 }
 
 QColor Theme::terminalForeground()
 {
-    return g_isDark ? QColor(QStringLiteral("#d7e0ea")) : QColor(QStringLiteral("#263238"));
+    return QColor(QStringLiteral("#d7e0ea"));
 }
 
 TerminalPalette Theme::terminalPalette()
@@ -175,26 +172,15 @@ TerminalPalette Theme::terminalPalette()
     TerminalPalette palette;
     palette.background = terminalBackground();
     palette.foreground = terminalForeground();
-    palette.cursor = accent();
-    if (g_isDark) {
-        palette.selection = QColor(QStringLiteral("#2f4a68"));
-        palette.selectionText = QColor(QStringLiteral("#ffffff"));
-        const std::array<const char *, 16> colors = {
-            "#1c2128", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd",
-            "#56b6c2", "#c8d0dc", "#5c6370", "#ff7b86", "#b5e890", "#ffd38a",
-            "#7cc4ff", "#dda0ff", "#7fe0ea", "#ffffff"};
-        for (int index = 0; index < 16; ++index)
-            palette.ansi[index] = QColor(QString::fromLatin1(colors[static_cast<size_t>(index)]));
-    } else {
-        palette.selection = QColor(QStringLiteral("#cfe3fa"));
-        palette.selectionText = QColor(QStringLiteral("#10243a"));
-        const std::array<const char *, 16> colors = {
-            "#000000", "#c0392b", "#2e8b57", "#b8860b", "#2f6ea8", "#8e44ad",
-            "#138d90", "#4a5a6b", "#5d6d7e", "#e74c3c", "#27ae60", "#d4a017",
-            "#3f8fd4", "#a569bd", "#1abc9c", "#24303f"};
-        for (int index = 0; index < 16; ++index)
-            palette.ansi[index] = QColor(QString::fromLatin1(colors[static_cast<size_t>(index)]));
-    }
+    palette.cursor = palette.foreground;
+    palette.selection = QColor(QStringLiteral("#2f4a68"));
+    palette.selectionText = QColor(QStringLiteral("#ffffff"));
+    const std::array<const char *, 16> colors = {
+        "#1c2128", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd",
+        "#56b6c2", "#c8d0dc", "#5c6370", "#ff7b86", "#b5e890", "#ffd38a",
+        "#7cc4ff", "#dda0ff", "#7fe0ea", "#ffffff"};
+    for (int index = 0; index < 16; ++index)
+        palette.ansi[index] = QColor(QString::fromLatin1(colors[static_cast<size_t>(index)]));
     return palette;
 }
 

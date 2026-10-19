@@ -465,8 +465,8 @@ QPixmap IconProvider::render(const QString &name, int size, const QColor &color,
 
 QIcon IconProvider::fileIcon(const FileInfo &info, bool local, bool large)
 {
+    static QFileIconProvider provider;
     if (local) {
-        static QFileIconProvider provider;
         QFileInfo fileInfo(info.path);
         if (fileInfo.exists() || fileInfo.isSymLink()) {
             QIcon systemIcon = provider.icon(fileInfo);
@@ -477,10 +477,10 @@ QIcon IconProvider::fileIcon(const FileInfo &info, bool local, bool large)
     if (info.isSymlink)
         return icon(QStringLiteral("link"));
     if (info.isDir)
-        return icon(QStringLiteral("folder"), Theme::accent());
+        return provider.icon(QFileIconProvider::Folder);
     const QString key = info.iconKey();
     if (key == QLatin1String("folder"))
-        return icon(QStringLiteral("folder"), Theme::accent());
+        return provider.icon(QFileIconProvider::Folder);
     if (key == QLatin1String("file"))
         return icon(QStringLiteral("file"));
     return icon(key);

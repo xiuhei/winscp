@@ -75,8 +75,8 @@ TransferQueueWidget::TransferQueueWidget(TransferManager *manager, QWidget *pare
 {
     setObjectName(QStringLiteral("TransferQueue"));
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(8, 8, 8, 8);
-    layout->setSpacing(6);
+    layout->setContentsMargins(3, 3, 3, 3);
+    layout->setSpacing(3);
 
     auto *toolbar = new QHBoxLayout();
     toolbar->setSpacing(4);
@@ -90,7 +90,7 @@ TransferQueueWidget::TransferQueueWidget(TransferManager *manager, QWidget *pare
     auto makeButton = [this](const QString &icon, const QString &text) {
         auto *button = new QToolButton(this);
         button->setIcon(IconProvider::instance().icon(icon));
-        button->setIconSize(QSize(17, 17));
+        button->setIconSize(QSize(16, 16));
         button->setText(text);
         button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
         button->setAutoRaise(true);
@@ -111,11 +111,12 @@ TransferQueueWidget::TransferQueueWidget(TransferManager *manager, QWidget *pare
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_table->setShowGrid(false);
-    m_table->setAlternatingRowColors(true);
+    m_table->setAlternatingRowColors(false);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->setWordWrap(false);
     m_table->verticalHeader()->setVisible(false);
-    m_table->verticalHeader()->setDefaultSectionSize(36);
+    m_table->verticalHeader()->setMinimumSectionSize(22);
+    m_table->verticalHeader()->setDefaultSectionSize(22);
     m_table->horizontalHeader()->setHighlightSections(false);
     m_table->horizontalHeader()->setStretchLastSection(true);
     m_table->setItemDelegateForColumn(TransferQueueModel::ProgressColumn,

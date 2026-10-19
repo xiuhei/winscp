@@ -88,8 +88,8 @@ void SessionEditor::buildUi()
     m_passwordToggle = new QToolButton(passwordRow);
     m_passwordToggle->setCheckable(true);
     m_passwordToggle->setIcon(IconProvider::instance().icon(QStringLiteral("eye")));
-    m_passwordToggle->setIconSize(QSize(18, 18));
-    m_passwordToggle->setFixedSize(28, 28);
+    m_passwordToggle->setIconSize(QSize(16, 16));
+    m_passwordToggle->setFixedSize(22, 22);
     m_passwordToggle->setToolTip(QStringLiteral("显示密码"));
     passwordLayout->addWidget(m_passwordEdit, 1);
     passwordLayout->addWidget(m_passwordToggle);

@@ -38,10 +38,10 @@ SiteManagerDialog::SiteManagerDialog(const SessionData &initial, QWidget *parent
 
     auto *header = new QHBoxLayout();
     auto *icon = new QLabel(this);
-    icon->setPixmap(IconProvider::instance().icon(QStringLiteral("site"), Theme::accent()).pixmap(40, 40));
+    icon->setPixmap(IconProvider::instance().icon(QStringLiteral("site"), Theme::accent()).pixmap(24, 24));
     auto *title = new QLabel(QStringLiteral("站点管理器"), this);
     QFont titleFont = title->font();
-    titleFont.setPointSize(15);
+    titleFont.setPointSize(10);
     titleFont.setBold(true);
     title->setFont(titleFont);
     auto *subtitle = new QLabel(QStringLiteral("保存常用服务器，快速连接并自动打开终端"), this);
@@ -68,7 +68,7 @@ SiteManagerDialog::SiteManagerDialog(const SessionData &initial, QWidget *parent
     m_searchEdit->addAction(IconProvider::instance().icon(QStringLiteral("search"), Theme::muted()),
                             QLineEdit::LeadingPosition);
     m_list = new QListWidget(leftPanel);
-    m_list->setIconSize(QSize(22, 22));
+    m_list->setIconSize(QSize(16, 16));
     m_list->setAlternatingRowColors(true);
     auto *leftButtons = new QHBoxLayout();
     auto *newButton = new QPushButton(QStringLiteral("新建"), leftPanel);

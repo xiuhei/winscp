@@ -3,7 +3,8 @@
 [CmdletBinding()]
 param(
     [string]$QtRoot = $env:DBGATE_QT_ROOT,
-    [string]$VcpkgRoot = $env:VCPKG_ROOT
+    [string]$VcpkgRoot = $env:VCPKG_ROOT,
+    [string]$PackageName = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,8 +18,9 @@ if ($LASTEXITCODE -ne 0) { throw "Release build failed" }
 $version = "1.0.0"
 $releaseDir = Join-Path $sourceRoot "build\Release"
 $distRoot = Join-Path $sourceRoot "dist"
-$packageDir = Join-Path $distRoot "WinSCPQt-$version-win64"
-$zipPath = Join-Path $distRoot "WinSCPQt-$version-win64.zip"
+if (-not $PackageName) { $PackageName = "WinSCPQt-$version-win64" }
+$packageDir = Join-Path $distRoot $PackageName
+$zipPath = Join-Path $distRoot "$PackageName.zip"
 
 $resolvedPackageDir = [IO.Path]::GetFullPath($packageDir)
 $resolvedDistRoot = [IO.Path]::GetFullPath($distRoot).TrimEnd('\') + '\'

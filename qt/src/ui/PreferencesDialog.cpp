@@ -34,7 +34,7 @@ PreferencesDialog::PreferencesDialog(QWidget *parent)
 
     auto *title = new QLabel(QStringLiteral("首选项"), this);
     QFont titleFont = title->font();
-    titleFont.setPointSize(15);
+    titleFont.setPointSize(10);
     titleFont.setBold(true);
     title->setFont(titleFont);
     layout->addWidget(title);

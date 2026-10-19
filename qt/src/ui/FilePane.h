@@ -137,7 +137,6 @@ private:
     QLineEdit *m_filterEdit = nullptr;
     QLabel *m_statusLabel = nullptr;
     QLabel *m_titleLabel = nullptr;
-    QLabel *m_subtitleLabel = nullptr;
     QLabel *m_badgeLabel = nullptr;
     QLabel *m_emptyLabel = nullptr;
     QLabel *m_welcomeTitle = nullptr;

@@ -403,7 +403,7 @@ void MainWindow::buildToolbar()
     m_toolBar->setObjectName(QStringLiteral("MainToolBar"));
     m_toolBar->setMovable(false);
     m_toolBar->setFloatable(false);
-    m_toolBar->setIconSize(QSize(20, 20));
+    m_toolBar->setIconSize(QSize(16, 16));
     m_toolBar->setToolButtonStyle(Qt::ToolButtonIconOnly);
     m_toolBar->addAction(m_newSessionAction);
     m_toolBar->addAction(m_siteManagerAction);
@@ -568,7 +568,7 @@ void MainWindow::restoreWindowSettings()
         const QRect available = QGuiApplication::primaryScreen()
             ? QGuiApplication::primaryScreen()->availableGeometry()
             : QRect(0, 0, 1440, 900);
-        resize(std::min(1380, available.width() - 80), std::min(880, available.height() - 80));
+        resize(std::min(1100, available.width() - 80), std::min(760, available.height() - 80));
         move(available.center() - rect().center());
     }
     if (!settings.windowState.isEmpty())

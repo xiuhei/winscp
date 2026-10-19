@@ -29,13 +29,13 @@ LoginDialog::LoginDialog(const SessionData &initial, QWidget *parent)
     auto *header = new QHBoxLayout();
     header->setSpacing(12);
     auto *icon = new QLabel(this);
-    icon->setPixmap(IconProvider::instance().appIcon().pixmap(52, 52));
-    icon->setFixedSize(52, 52);
+    icon->setPixmap(IconProvider::instance().appIcon().pixmap(24, 24));
+    icon->setFixedSize(24, 24);
     auto *titleColumn = new QVBoxLayout();
     titleColumn->setSpacing(2);
     auto *title = new QLabel(QStringLiteral("登录到远程服务器"), this);
     QFont titleFont = title->font();
-    titleFont.setPointSize(15);
+    titleFont.setPointSize(10);
     titleFont.setBold(true);
     title->setFont(titleFont);
     auto *subtitle = new QLabel(

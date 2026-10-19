@@ -21,7 +21,7 @@ public:
     void load();
     void save();
 
-    QString theme = QStringLiteral("dark");
+    QString theme = QStringLiteral("light");
     bool showHiddenFiles = false;
     bool confirmDelete = true;
     bool confirmOverwrite = true;

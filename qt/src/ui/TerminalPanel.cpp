@@ -40,10 +40,10 @@ QToolButton *makeToolButton(QWidget *parent, const QString &iconName, const QStr
 {
     auto *button = new QToolButton(parent);
     button->setIcon(IconProvider::instance().icon(iconName));
-    button->setIconSize(QSize(17, 17));
+    button->setIconSize(QSize(16, 16));
     button->setToolTip(tooltip);
     button->setAutoRaise(true);
-    button->setFixedSize(28, 28);
+    button->setFixedSize(22, 22);
     button->setFocusPolicy(Qt::NoFocus);
     return button;
 }
@@ -76,11 +76,11 @@ void TerminalPanel::buildUi()
     auto *toolbar = new QFrame(this);
     toolbar->setObjectName(QStringLiteral("TerminalToolbar"));
     auto *toolbarLayout = new QHBoxLayout(toolbar);
-    toolbarLayout->setContentsMargins(10, 5, 8, 5);
-    toolbarLayout->setSpacing(5);
+    toolbarLayout->setContentsMargins(4, 1, 3, 1);
+    toolbarLayout->setSpacing(3);
     auto *icon = new QLabel(toolbar);
-    icon->setPixmap(IconProvider::instance().icon(QStringLiteral("terminal"), Theme::accent())
-                        .pixmap(18, 18));
+    icon->setPixmap(IconProvider::instance().icon(QStringLiteral("terminal"))
+                        .pixmap(16, 16));
     auto *title = new QLabel(QStringLiteral("终端"), toolbar);
     title->setObjectName(QStringLiteral("TerminalTitle"));
     toolbarLayout->addWidget(icon);
@@ -169,7 +169,7 @@ void TerminalPanel::buildWelcomePage()
     layout->addStretch(1);
     auto *icon = new QLabel(m_welcomePage);
     icon->setPixmap(IconProvider::instance().icon(QStringLiteral("terminal"), Theme::accent())
-                        .pixmap(48, 48));
+                        .pixmap(24, 24));
     icon->setAlignment(Qt::AlignCenter);
     m_welcomeTitle = new QLabel(QStringLiteral("SSH 终端"), m_welcomePage);
     m_welcomeTitle->setObjectName(QStringLiteral("WelcomeTitle"));
@@ -180,7 +180,7 @@ void TerminalPanel::buildWelcomePage()
     m_welcomeHint->setWordWrap(true);
     m_welcomeButton = new QPushButton(QStringLiteral("打开终端"), m_welcomePage);
     m_welcomeButton->setProperty("accent", true);
-    m_welcomeButton->setIcon(IconProvider::instance().icon(QStringLiteral("terminal"), Qt::white));
+    m_welcomeButton->setIcon(IconProvider::instance().icon(QStringLiteral("terminal"), Theme::iconColor()));
     auto *buttonRow = new QHBoxLayout();
     buttonRow->addStretch(1);
     buttonRow->addWidget(m_welcomeButton);
@@ -382,7 +382,7 @@ void TerminalPanel::appendTab(const TabData &data, const QString &title)
     closeButton->setToolTip(QStringLiteral("关闭终端"));
     closeButton->setStyleSheet(
         QStringLiteral("QToolButton { background: transparent; border: none; padding: 0; }"
-                       "QToolButton:hover { background: rgba(224,130,28,60); border-radius: 3px; }"));
+                       "QToolButton:hover { background: palette(midlight); }"));
     m_tabs->tabBar()->setTabButton(index, QTabBar::RightSide, closeButton);
     TerminalWidget *widget = data.widget;
     connect(closeButton, &QToolButton::clicked, this, [this, widget] {
