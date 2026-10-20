@@ -17,6 +17,9 @@ if ($LASTEXITCODE -ne 0) { throw "Release build failed" }
 
 $version = "1.0.0"
 $releaseDir = Join-Path $sourceRoot "build\Release"
+if ((Get-Item -LiteralPath (Join-Path $releaseDir "WinSCPQt.exe")).VersionInfo.ProductVersion -ne $version) {
+    throw "Executable product version does not match the release version"
+}
 $distRoot = Join-Path $sourceRoot "dist"
 if (-not $PackageName) { $PackageName = "WinSCPQt-$version-win64" }
 $packageDir = Join-Path $distRoot $PackageName
