@@ -11,6 +11,7 @@
 #include "transfer/TransferManager.h"
 #include "transfer/TransferQueueModel.h"
 #include "ui/FilePane.h"
+#include "ui/RemoteFileOpener.h"
 #include "ui/IconProvider.h"
 #include "ui/LoginDialog.h"
 #include "ui/PreferencesDialog.h"
@@ -351,6 +352,7 @@ void MainWindow::buildUi()
                qint64 targetSize) {
             return askConflict(targetPath, direction, sourceSize, targetSize);
         });
+    m_fileOpener = new RemoteFileOpener(m_remoteFs, m_transferManager, this);
     m_queueWidget = new TransferQueueWidget(m_transferManager, this);
 }
 
@@ -483,6 +485,10 @@ void MainWindow::connectSignals()
             });
     for (FilePane *pane : {m_localPane, m_remotePane}) {
         connect(pane, &FilePane::openRequested, this, &MainWindow::openFile);
+        connect(pane, &FilePane::editRequested, this, [this](const FileInfo &info) {
+            if (m_connected)
+                m_remoteFs->readFile(info.path);
+        });
         connect(pane, &FilePane::deleteRequested, this, &MainWindow::deleteEntries);
         connect(pane, &FilePane::renameRequested, this, &MainWindow::renameEntry);
         connect(pane, &FilePane::newFolderRequested, this, &MainWindow::createFolder);
@@ -491,7 +497,11 @@ void MainWindow::connectSignals()
             showStatus(message, true);
         });
         connect(pane, &FilePane::selectionChanged, this, &MainWindow::updateActions);
-        connect(pane, &FilePane::pathChanged, this, [this](const QString &, bool) {
+        connect(pane, &FilePane::pathChanged, this, [this](const QString &directory, bool remote) {
+            if (remote)
+                m_terminalPanel->synchronizeToDirectory(directory);
+            if (m_connected && !m_demo)
+                Settings::instance().rememberDirectories(m_session, m_localPane->currentPath(), m_remotePane->currentPath());
             updateTitle();
             updateActions();
         });
@@ -529,6 +539,12 @@ void MainWindow::connectSignals()
             &MainWindow::onSymlinkCreated);
     connect(m_remoteFs, &FileSystemController::busyChanged, this, [this](bool) { updateActions(); });
 
+    connect(m_terminalPanel, &TerminalPanel::directoryChanged, this, [this](const QString &directory) {
+        if (m_connected && directory != m_remotePane->currentPath())
+            m_remotePane->navigateRemote(directory);
+    });
+    connect(m_fileOpener, &RemoteFileOpener::statusMessage, this,
+            [this](const QString &message) { showStatus(message, true); });
     connect(m_terminalPanel, &TerminalPanel::connectRequested, this, [this] {
         newSession();
     });
@@ -537,8 +553,9 @@ void MainWindow::connectSignals()
     connect(m_terminalPanel, &TerminalPanel::terminalCountChanged, this,
             [this](int) { updateActions(); });
 
-    connect(m_transferManager, &TransferManager::taskAdded, this, [this](int) {
-        showTransferDock(true);
+    connect(m_transferManager, &TransferManager::taskAdded, this, [this](int id) {
+        if (!m_transferManager->opensFile(id))
+            showTransferDock(true);
         updateTransferSummary();
         const int active = m_transferManager->model()->activeCount();
         showStatus(active > 0 ? QStringLiteral("已加入传输队列，共 %1 个活动任务。").arg(active)
@@ -547,6 +564,9 @@ void MainWindow::connectSignals()
     connect(m_transferManager, &TransferManager::allTransfersFinished, this, [this] {
         updateTransferSummary();
         showStatus(QStringLiteral("所有传输任务已完成。"));
+        m_localPane->refresh();
+        if (m_connected)
+            m_remotePane->refresh();
     });
     connect(m_transferManager, &TransferManager::statusMessage, this,
             [this](const QString &message) { showStatus(message, true); });
@@ -554,11 +574,7 @@ void MainWindow::connectSignals()
             &MainWindow::updateTransferSummary);
     connect(m_transferManager->model(), &TransferQueueModel::rowsChanged, this,
             &MainWindow::updateTransferSummary);
-    connect(m_transferManager, &TransferManager::downloadReadyToOpen, this,
-            [this](const QString &localPath) {
-                if (!QDesktopServices::openUrl(QUrl::fromLocalFile(localPath)))
-                    showStatus(QStringLiteral("无法打开文件：%1").arg(localPath), true);
-            });
+
 }
 
 void MainWindow::restoreWindowSettings()
@@ -625,7 +641,6 @@ void MainWindow::newSession()
         initial.timeoutSeconds = Settings::instance().connectionTimeout;
         initial.keepAliveSeconds = Settings::instance().keepAlive;
     }
-    initial.localDirectory = m_localPane->currentPath();
     LoginDialog dialog(initial, this);
     if (dialog.exec() != QDialog::Accepted)
         return;
@@ -650,8 +665,9 @@ void MainWindow::openSiteManager()
     connectToSession(session);
 }
 
-void MainWindow::connectToSession(const SessionData &session)
+void MainWindow::connectToSession(const SessionData &requestedSession)
 {
+    const SessionData session = Settings::instance().restoreDirectories(requestedSession);
     if (!session.isValid()) {
         QMessageBox::warning(this, QStringLiteral("无法连接"), QStringLiteral("会话信息不完整。"));
         return;
@@ -667,6 +683,8 @@ void MainWindow::connectToSession(const SessionData &session)
     m_session = session;
     m_connecting = true;
     m_connected = false;
+    if (!session.localDirectory.isEmpty() && QFileInfo(session.localDirectory).isDir())
+        m_localPane->navigateLocal(session.localDirectory);
     m_remotePane->setRemoteConnecting(session);
     m_terminalPanel->setSession(session);
     m_remoteFs->connectToHost(session);
@@ -809,6 +827,7 @@ void MainWindow::openPreferences()
     }
     refreshTheme();
     m_terminalPanel->applySettings();
+    m_fileOpener->cleanup();
     showStatus(QStringLiteral("首选项已保存。"));
 }
 
@@ -1100,16 +1119,7 @@ void MainWindow::openFile(const FileInfo &info, bool remote)
     }
     if (!m_connected)
         return;
-    if (path::isTextFileName(info.name)) {
-        showStatus(QStringLiteral("正在打开 %1 …").arg(info.name));
-        m_remoteFs->readFile(info.path);
-        return;
-    }
-    const QString targetDirectory = QDir(AppPaths::tempDir()).filePath(QStringLiteral("open"));
-    QDir().mkpath(targetDirectory);
-    const QString targetPath = QDir(targetDirectory).filePath(path::safeRemoteFileName(info.name));
-    QFile::remove(targetPath);
-    downloadEntries({info}, targetDirectory, true);
+    m_fileOpener->open(m_session, info);
 }
 
 void MainWindow::handleExternalDrop(const QList<QUrl> &urls, const QString &targetDirectory,
@@ -1404,6 +1414,7 @@ void MainWindow::refreshTheme()
     m_localPane->updateFileIconTheme();
     m_remotePane->updateFileIconTheme();
     m_terminalPanel->applySettings();
+    m_fileOpener->cleanup();
     if (m_siteLabel) {
         m_siteLabel->setStyleSheet(
             QStringLiteral("padding: 0 10px; color: %1;").arg(Theme::muted().name()));

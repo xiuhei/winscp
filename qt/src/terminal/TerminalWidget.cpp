@@ -156,6 +156,11 @@ void TerminalWidget::feed(const QByteArray &utf8)
         QApplication::beep();
     if (m_screen.takeTitleChanged())
         emit titleChanged(m_screen.title());
+    const QString shell = m_screen.takeShellName();
+    if (!shell.isEmpty())
+        emit shellDetected(shell);
+    for (const QString &directory : m_screen.takeWorkingDirectories())
+        emit workingDirectoryChanged(directory);
     const int after = m_screen.scrollbackCount();
     if (m_scrollOffset > 0)
         m_scrollOffset += after - before;

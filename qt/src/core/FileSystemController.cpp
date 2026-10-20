@@ -60,7 +60,8 @@ public:
             m_keepAlive->start();
         }
         emit connected(session, m_home, m_currentPath);
-        doList(m_currentPath);
+        if (!doList(m_currentPath) && m_currentPath != m_home)
+            doList(m_home);
     }
 
     void disconnectFromHost()
@@ -158,6 +159,17 @@ public:
             doList(m_currentPath);
     }
 
+    void statFile(const QString &path, quint64 requestId)
+    {
+        FileInfo info;
+        QString error;
+        if (!m_backend || !m_backend->isConnected())
+            error = QStringLiteral("连接已断开。");
+        else if (!m_backend->stat(path, &info, &error) && error.isEmpty())
+            error = QStringLiteral("无法读取文件属性。");
+        emit fileStated(requestId, m_session, path, info, error);
+    }
+
     void readFile(const QString &path)
     {
         if (!ensureBackend())
@@ -204,6 +216,7 @@ signals:
     void directoryFailed(const QString &path, const QString &message);
     void operationFinished(const QString &action, bool success, const QString &message);
     void fileRead(const QString &path, const QByteArray &data);
+    void fileStated(quint64 requestId, const wsc::SessionData &session, const QString &path, const wsc::FileInfo &info, const QString &error);
     void fileWriteFinished(const QString &path, bool success, const QString &message);
     void symlinkCreated(const QString &linkPath, bool success, const QString &message);
 
@@ -227,11 +240,11 @@ private:
         }
     }
 
-    void doList(const QString &pathValue)
+    bool doList(const QString &pathValue)
     {
         if (!m_backend || !m_backend->isConnected()) {
             emit directoryFailed(pathValue, QStringLiteral("当前没有活动的远程连接。"));
-            return;
+            return false;
         }
         const QString path = path::normalizeRemote(pathValue);
         emit directoryLoading(path);
@@ -239,7 +252,7 @@ private:
         QString error;
         if (!m_backend->list(path, &entries, &error)) {
             emit directoryFailed(path, error);
-            return;
+            return false;
         }
         m_currentPath = path;
         std::sort(entries.begin(), entries.end(), [](const FileInfo &left, const FileInfo &right) {
@@ -248,6 +261,7 @@ private:
             return QString::localeAwareCompare(left.name, right.name) < 0;
         });
         emit directoryListed(path, entries);
+        return true;
     }
 
     BackendPtr m_backend;
@@ -286,6 +300,8 @@ FileSystemController::FileSystemController(QObject *parent)
             &FileSystemController::onFileWriteFinished, Qt::QueuedConnection);
     connect(m_worker, &FileSystemWorker::symlinkCreated, this,
             &FileSystemController::onSymlinkCreated, Qt::QueuedConnection);
+    connect(m_worker, &FileSystemWorker::fileStated, this, &FileSystemController::fileStated,
+            Qt::QueuedConnection);
     m_thread.setObjectName(QStringLiteral("RemoteFileSystem"));
     m_thread.start();
 }
@@ -389,6 +405,11 @@ void FileSystemController::setPermissions(const QString &path, quint32 mode)
     QMetaObject::invokeMethod(
         m_worker, [worker = m_worker, path, mode]() { worker->setPermissions(path, mode); },
         Qt::QueuedConnection);
+}
+
+void FileSystemController::statFile(const QString &path, quint64 requestId)
+{
+    QMetaObject::invokeMethod(m_worker, [this, path, requestId] { m_worker->statFile(path, requestId); }, Qt::QueuedConnection);
 }
 
 void FileSystemController::readFile(const QString &path)

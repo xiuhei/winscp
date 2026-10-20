@@ -48,6 +48,8 @@ QVariant FileTableModel::data(const QModelIndex &index, int role) const
 
     switch (role) {
     case Qt::DisplayRole:
+        if (info.isParent && column != NameColumn)
+            return {};
         switch (column) {
         case NameColumn:
             return info.name;
@@ -123,11 +125,19 @@ QVariant FileTableModel::headerData(int section, Qt::Orientation orientation, in
     return QAbstractTableModel::headerData(section, orientation, role);
 }
 
+QStringList FileTableModel::mimeTypes() const
+{
+    return {QStringLiteral("application/x-winscpqt-entries"), QStringLiteral("text/uri-list")};
+}
+
 Qt::ItemFlags FileTableModel::flags(const QModelIndex &index) const
 {
     if (!index.isValid())
-        return Qt::NoItemFlags;
-    return Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled;
+        return Qt::ItemIsDropEnabled;
+    Qt::ItemFlags flags = Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDropEnabled;
+    if (!entryAt(index.row()).isParent)
+        flags |= Qt::ItemIsDragEnabled;
+    return flags;
 }
 
 qint64 FileTableModel::totalFileSize() const
@@ -144,7 +154,7 @@ int FileTableModel::folderCount() const
 {
     int count = 0;
     for (const FileInfo &info : m_entries) {
-        if (info.isDir)
+        if (info.isDir && !info.isParent)
             ++count;
     }
     return count;
@@ -152,7 +162,11 @@ int FileTableModel::folderCount() const
 
 int FileTableModel::fileCount() const
 {
-    return m_entries.size() - folderCount();
+    int count = 0;
+    for (const FileInfo &info : m_entries)
+        if (!info.isDir)
+            ++count;
+    return count;
 }
 
 FileFilterProxyModel::FileFilterProxyModel(QObject *parent)
@@ -190,6 +204,8 @@ bool FileFilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex &so
     const QModelIndex index = model->index(sourceRow, FileTableModel::NameColumn, sourceParent);
     const QString name = model->data(index, Qt::DisplayRole).toString();
     const auto *fileModel = qobject_cast<const FileTableModel *>(sourceModel());
+    if (fileModel && fileModel->entryAt(sourceRow).isParent)
+        return true;
     if (fileModel && fileModel->entryAt(sourceRow).isHidden && !m_showHidden)
         return false;
     if (!m_filter.isEmpty() && !path::wildcardMatch(m_filter, name))
@@ -208,8 +224,10 @@ bool FileFilterProxyModel::lessThan(const QModelIndex &left, const QModelIndex &
     if (!leftInfo.isValid() || !rightInfo.isValid())
         return QSortFilterProxyModel::lessThan(left, right);
 
+    if (leftInfo.isParent != rightInfo.isParent)
+        return sortOrder() == Qt::AscendingOrder ? leftInfo.isParent : rightInfo.isParent;
     if (leftInfo.isDir != rightInfo.isDir)
-        return leftInfo.isDir;
+        return sortOrder() == Qt::AscendingOrder ? leftInfo.isDir : rightInfo.isDir;
 
     const int column = left.column();
     int comparison = 0;

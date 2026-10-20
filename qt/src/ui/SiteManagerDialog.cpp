@@ -134,7 +134,6 @@ SiteManagerDialog::SiteManagerDialog(const SessionData &initial, QWidget *parent
         session.protocol = Protocol::Sftp;
         session.port = 22;
         session.siteName = QStringLiteral("新站点");
-        session.localDirectory = Settings::instance().lastLocalDirectory;
         m_editor->setSession(session);
         m_editor->setSiteNameVisible(true);
         m_statusLabel->setText(QStringLiteral("尚无保存的站点，填写信息后点击“保存”。"));
@@ -193,7 +192,6 @@ void SiteManagerDialog::newSite()
     session.protocol = Protocol::Sftp;
     session.port = 22;
     session.siteName = QStringLiteral("新站点");
-    session.localDirectory = Settings::instance().lastLocalDirectory;
     m_editor->setSession(session);
     m_editor->setSiteNameVisible(true);
     m_list->clearSelection();

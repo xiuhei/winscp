@@ -48,6 +48,7 @@
 #include <QStyledItemDelegate>
 #include <QTableView>
 #include <QToolButton>
+#include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -96,8 +97,9 @@ protected:
     {
         if (canDropHandler && canDropHandler(event->mimeData())) {
             event->setDropAction(Qt::CopyAction);
-            event->accept();
             QTableView::dragMoveEvent(event);
+            event->setDropAction(Qt::CopyAction);
+            event->accept();
             return;
         }
         event->ignore();
@@ -122,27 +124,7 @@ protected:
         QTableView::keyPressEvent(event);
     }
 
-    void mousePressEvent(QMouseEvent *event) override
-    {
-        if (event->button() == Qt::LeftButton)
-            m_pressPosition = event->pos();
-        QTableView::mousePressEvent(event);
-    }
 
-    void mouseMoveEvent(QMouseEvent *event) override
-    {
-        if ((event->buttons() & Qt::LeftButton) &&
-            (event->pos() - m_pressPosition).manhattanLength() >=
-                QApplication::startDragDistance()) {
-            if (dragHandler)
-                dragHandler();
-            return;
-        }
-        QTableView::mouseMoveEvent(event);
-    }
-
-private:
-    QPoint m_pressPosition;
 };
 
 QToolButton *makeToolButton(QWidget *parent, const QString &iconName, const QString &tooltip)
@@ -189,6 +171,21 @@ QJsonObject infoToJson(const FileInfo &info)
     object.insert(QStringLiteral("mode"), static_cast<int>(info.mode));
     object.insert(QStringLiteral("modified"), info.modified.toString(Qt::ISODate));
     return object;
+}
+
+FileList withParent(FileList entries, const QString &directory, bool remote)
+{
+    const QString parent = remote ? path::remoteParent(directory)
+                                  : QDir::cleanPath(QDir(directory).filePath(QStringLiteral("..")));
+    if (parent != directory && !(remote ? path::remoteIsRoot(directory) : QDir(directory).isRoot())) {
+        FileInfo entry;
+        entry.name = QStringLiteral("..");
+        entry.path = parent;
+        entry.isDir = true;
+        entry.isParent = true;
+        entries.prepend(entry);
+    }
+    return entries;
 }
 
 QString normalizedLocalInput(const QString &text)
@@ -268,6 +265,28 @@ void FilePane::buildUi()
         m_terminalButton->hide();
         m_disconnectButton->hide();
     }
+    if (isRemote()) {
+        m_autoRefreshButton = new QToolButton(header);
+        m_autoRefreshButton->setObjectName(QStringLiteral("AutoRefreshButton"));
+        m_autoRefreshButton->setText(QStringLiteral("自动刷新"));
+        m_autoRefreshButton->setToolTip(QStringLiteral("每 2 秒刷新当前远程目录"));
+        m_autoRefreshButton->setCheckable(true);
+        m_autoRefreshButton->setAutoRaise(true);
+        m_autoRefreshButton->setChecked(Settings::instance().autoRefresh);
+        titleRow->addWidget(m_autoRefreshButton);
+        auto *timer = new QTimer(this);
+        timer->setInterval(2000);
+        connect(timer, &QTimer::timeout, this, [this] {
+            if (m_autoRefreshButton->isChecked() && m_remoteConnected && !m_loading &&
+                m_controller && !m_controller->isBusy())
+                refresh();
+        });
+        connect(m_autoRefreshButton, &QToolButton::toggled, this, [](bool enabled) {
+            Settings::instance().autoRefresh = enabled;
+            Settings::instance().save();
+        });
+        timer->start();
+    }
     titleRow->addWidget(m_terminalButton);
     titleRow->addWidget(m_hiddenButton);
     titleRow->addWidget(m_connectButton);
@@ -295,7 +314,25 @@ void FilePane::buildUi()
     pathRow->addWidget(m_forwardButton);
     pathRow->addWidget(m_upButton);
     pathRow->addWidget(m_homeButton);
-    pathRow->addWidget(m_pathCombo, 1);
+    m_pathStack = new QStackedWidget(header);
+    m_breadcrumbs = new QLabel(m_pathStack);
+    m_breadcrumbs->setObjectName(QStringLiteral("PathBreadcrumbs"));
+    m_breadcrumbs->setTextFormat(Qt::RichText);
+    m_breadcrumbs->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
+    m_breadcrumbs->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    m_breadcrumbs->setMargin(3);
+    m_pathStack->addWidget(m_breadcrumbs);
+    m_pathStack->addWidget(m_pathCombo);
+    connect(m_breadcrumbs, &QLabel::linkActivated, this, [this](const QString &link) {
+        navigate(QUrl::fromPercentEncoding(link.toLatin1()));
+    });
+    auto *editPath = makeToolButton(header, QStringLiteral("edit"), QStringLiteral("输入路径 (Ctrl+L)"));
+    connect(editPath, &QToolButton::clicked, this, &FilePane::focusPathEditor);
+    connect(m_pathCombo->lineEdit(), &QLineEdit::editingFinished, this, [this] {
+        m_pathStack->setCurrentIndex(0);
+    });
+    pathRow->addWidget(m_pathStack, 1);
+    pathRow->addWidget(editPath);
     pathRow->addWidget(m_refreshButton);
     headerLayout->addLayout(pathRow);
 
@@ -373,7 +410,7 @@ void FilePane::buildUi()
     footerLayout->addWidget(m_statusLabel);
     outer->addWidget(footer);
 
-    m_model = new FileTableModel(isRemote(), this);
+    m_model = new FileTableModel(!isRemote(), this);
     m_proxy = new FileFilterProxyModel(this);
     m_proxy->setSourceModel(m_model);
     m_proxy->setShowHidden(m_showHidden);
@@ -653,6 +690,9 @@ void FilePane::setRemoteConnecting(const SessionData &session)
     if (m_role != Role::Remote)
         return;
     m_session = session;
+    m_remotePath.clear();
+    m_history.clear();
+    m_historyIndex = -1;
     m_connecting = true;
     m_remoteConnected = false;
     m_badgeLabel->setText(QStringLiteral("连接中"));
@@ -717,6 +757,7 @@ void FilePane::showRemoteDisconnected(const QString &reason)
     m_model->setEntries({});
     m_stack->setCurrentWidget(m_welcomePage);
     m_pathCombo->setEditText(QString());
+    m_breadcrumbs->clear();
     m_pathCombo->setEnabled(false);
     m_badgeLabel->setText(QStringLiteral("远程"));
     m_titleLabel->setText(QStringLiteral("远程文件"));
@@ -800,6 +841,9 @@ void FilePane::applyRemoteListing(const QString &path, const QList<FileInfo> &en
     if (m_role != Role::Remote)
         return;
     const QString normalized = path::normalizeRemote(path);
+    const bool sameDirectory = m_remotePath == normalized && !m_remotePath.isEmpty();
+    const int scroll = m_table->verticalScrollBar()->value();
+    const QString currentName = currentEntry().name;
     const QStringList selectedNames = [&] {
         QStringList names;
         for (const FileInfo &entry : selectedEntries())
@@ -807,7 +851,7 @@ void FilePane::applyRemoteListing(const QString &path, const QList<FileInfo> &en
         return names;
     }();
     m_remotePath = normalized;
-    m_model->setEntries(entries);
+    m_model->setEntries(withParent(entries, normalized, true));
     m_proxy->setShowHidden(m_showHidden);
     m_table->clearSelection();
     m_table->setCurrentIndex(QModelIndex());
@@ -827,7 +871,14 @@ void FilePane::applyRemoteListing(const QString &path, const QList<FileInfo> &en
     }
     if (!selectedNames.isEmpty())
         selectByName(selectedNames);
-    emit pathChanged(normalized, true);
+    if (sameDirectory) {
+        for (int row = 0; row < m_proxy->rowCount(); ++row)
+            if (entryAtViewRow(row).name == currentName)
+                m_table->selectionModel()->setCurrentIndex(m_proxy->index(row, 0), QItemSelectionModel::NoUpdate);
+        m_table->verticalScrollBar()->setValue(scroll);
+    }
+    else
+        emit pathChanged(normalized, true);
 }
 
 void FilePane::navigate(const QString &pathValue)
@@ -878,7 +929,7 @@ bool FilePane::loadLocalDirectory(const QString &pathValue, bool addToHistory)
             entries.append(fileInfo);
     }
     m_localPath = QDir::cleanPath(input);
-    m_model->setEntries(entries);
+    m_model->setEntries(withParent(entries, m_localPath, false));
     m_table->clearSelection();
     m_table->setCurrentIndex(QModelIndex());
     m_stack->setCurrentIndex(0);
@@ -945,7 +996,7 @@ void FilePane::goHome()
 void FilePane::refresh()
 {
     if (isRemote()) {
-        if (!m_remoteConnected)
+        if (!m_remoteConnected || m_loading || !m_controller || m_controller->isBusy())
             return;
         m_pendingHistory = false;
         m_pendingRemotePath = m_remotePath;
@@ -966,6 +1017,7 @@ void FilePane::focusFileList()
 
 void FilePane::focusPathEditor()
 {
+    m_pathStack->setCurrentIndex(1);
     m_pathCombo->setFocus();
     m_pathCombo->lineEdit()->selectAll();
 }
@@ -981,7 +1033,7 @@ QList<FileInfo> FilePane::selectedEntries() const
     const QModelIndexList rows = m_table->selectionModel()->selectedRows();
     for (const QModelIndex &index : rows) {
         const FileInfo info = entryAtViewRow(index.row());
-        if (info.isValid())
+        if (info.isValid() && !info.isParent)
             entries.append(info);
     }
     return entries;
@@ -1082,6 +1134,33 @@ void FilePane::updateCombo(const QString &path)
 {
     if (!m_pathCombo)
         return;
+    QString normalized = QDir::fromNativeSeparators(path);
+    QStringList parts = normalized.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    QString target = normalized.startsWith(QLatin1Char('/')) ? QStringLiteral("/") : QString();
+    QStringList links;
+    const auto link = [](const QString &name, const QString &value) {
+        return QStringLiteral("<a href=\"%1\" style=\"color:%3;text-decoration:none\">%2</a>")
+            .arg(QString::fromLatin1(QUrl::toPercentEncoding(value)), name.toHtmlEscaped(), Theme::text().name());
+    };
+    if (!target.isEmpty())
+        links.append(link(QStringLiteral("/"), target));
+    if (normalized.startsWith(QStringLiteral("//"))) {
+        target = QStringLiteral("//") + parts.takeFirst();
+        if (!parts.isEmpty())
+            target += QLatin1Char('/') + parts.takeFirst();
+        links = {link(target, target)};
+    }
+    for (const QString &part : parts) {
+        if (!target.isEmpty() && !target.endsWith(QLatin1Char('/')))
+            target += QLatin1Char('/');
+        target += part;
+        if (target.endsWith(QLatin1Char(':')))
+            target += QLatin1Char('/');
+        links.append(link(part, target));
+    }
+    m_breadcrumbs->setText(links.join(QStringLiteral(" &#8250; ")));
+    m_breadcrumbs->setToolTip(path);
+    m_pathStack->setCurrentIndex(0);
     const QSignalBlocker blocker(m_pathCombo);
     m_pathCombo->setEditText(path);
     int existing = -1;
@@ -1172,6 +1251,8 @@ void FilePane::updateNavigationButtons()
         m_homeButton->setEnabled(m_remoteConnected);
         m_refreshButton->setEnabled(m_remoteConnected);
         m_pathCombo->setEnabled(m_remoteConnected);
+        m_pathStack->setEnabled(m_remoteConnected);
+        m_autoRefreshButton->setEnabled(m_remoteConnected);
         m_disconnectButton->setVisible(m_remoteConnected);
         m_connectButton->setVisible(!m_remoteConnected && !m_connecting);
         m_connectButton->setEnabled(!m_connecting);
@@ -1256,6 +1337,14 @@ void FilePane::showContextMenu(const QPoint &position)
     const QModelIndex clicked = m_table->indexAt(position);
     if (clicked.isValid() && !m_table->selectionModel()->isSelected(clicked))
         m_table->selectRow(clicked.row());
+    const FileInfo clickedEntry = entryAtViewRow(clicked.row());
+    if (clickedEntry.isParent) {
+        QMenu menu(this);
+        auto *up = menu.addAction(QStringLiteral("上一级目录"));
+        if (menu.exec(m_table->viewport()->mapToGlobal(position)) == up)
+            goUp();
+        return;
+    }
     const QList<FileInfo> entries = selectedEntries();
     const FileInfo single = entries.size() == 1 ? entries.first() : FileInfo();
 
@@ -1324,7 +1413,7 @@ void FilePane::showContextMenu(const QPoint &position)
     if (chosen == openAction) {
         activateCurrent();
     } else if (editAction && chosen == editAction) {
-        emit openRequested(single, true);
+        emit editRequested(single);
     } else if (chosen == transferAction) {
         if (isRemote())
             emit downloadRequested(entries);
@@ -1392,7 +1481,7 @@ void FilePane::startDrag()
         const QIcon icon = decoration.value<QIcon>();
         drag->setPixmap(icon.pixmap(36, 36));
     }
-    drag->exec(isRemote() ? Qt::CopyAction : (Qt::CopyAction | Qt::MoveAction), Qt::CopyAction);
+    drag->exec(Qt::CopyAction, Qt::CopyAction);
 }
 
 void FilePane::resizeEvent(QResizeEvent *event)

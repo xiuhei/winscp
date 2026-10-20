@@ -46,6 +46,7 @@ public:
     int enqueueDownload(const SessionData &session, const QList<FileInfo> &remoteEntries,
                         const QString &localDirectory, bool openWhenDone = false);
 
+    bool opensFile(int id) const;
     void cancelTask(int id);
     void cancelAll();
     void clearFinished();

@@ -45,6 +45,7 @@ set(WINSCPQT_CORE_SOURCES
     src/ui/IconProvider.cpp
     src/ui/LoginDialog.cpp
     src/ui/MainWindow.cpp
+    src/ui/RemoteFileOpener.cpp
     src/ui/PreferencesDialog.cpp
     src/ui/PropertiesDialog.cpp
     src/ui/SessionEditor.cpp

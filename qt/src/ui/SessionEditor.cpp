@@ -118,24 +118,6 @@ void SessionEditor::buildUi()
     passphraseLayout->addWidget(m_passphraseEdit);
     m_connectionForm->addRow(QStringLiteral("私钥口令："), m_passphraseRow);
 
-    m_remoteDirectoryEdit = new QLineEdit(connectionGroup);
-    m_remoteDirectoryEdit->setPlaceholderText(QStringLiteral("留空表示主目录"));
-    m_connectionForm->addRow(QStringLiteral("远程目录："), m_remoteDirectoryEdit);
-
-    auto *localRow = new QWidget(connectionGroup);
-    auto *localLayout = new QHBoxLayout(localRow);
-    localLayout->setContentsMargins(0, 0, 0, 0);
-    localLayout->setSpacing(6);
-    m_localDirectoryEdit = new QLineEdit(localRow);
-    m_localDirectoryEdit->setPlaceholderText(QStringLiteral("留空表示使用上次的本地目录"));
-    auto *localBrowse = new QToolButton(localRow);
-    localBrowse->setText(QStringLiteral("…"));
-    localBrowse->setFixedWidth(30);
-    localBrowse->setToolTip(QStringLiteral("选择本地目录"));
-    localLayout->addWidget(m_localDirectoryEdit, 1);
-    localLayout->addWidget(localBrowse);
-    m_connectionForm->addRow(QStringLiteral("本地目录："), localRow);
-
     layout->addWidget(connectionGroup);
 
     auto *optionsGroup = new QGroupBox(QStringLiteral("选项"), this);
@@ -196,13 +178,6 @@ void SessionEditor::buildUi()
         if (!path.isEmpty())
             m_keyEdit->setText(path);
     });
-    connect(localBrowse, &QToolButton::clicked, this, [this] {
-        const QString path = QFileDialog::getExistingDirectory(
-            this, QStringLiteral("选择本地目录"),
-            m_localDirectoryEdit->text().isEmpty() ? QDir::homePath() : m_localDirectoryEdit->text());
-        if (!path.isEmpty())
-            m_localDirectoryEdit->setText(path);
-    });
     connect(m_protocolCombo, &QComboBox::currentIndexChanged, this, [this](int) {
         const Protocol protocol = currentProtocol();
         const int currentPort = m_portSpin->value();
@@ -256,11 +231,6 @@ void SessionEditor::updateVisibility()
     setFormRowVisible(m_optionsForm, m_verifyTlsCheck, ftps || dav);
     setFormRowVisible(m_optionsForm, m_webDavHttpsCheck, dav);
     setFormRowVisible(m_optionsForm, m_compressionCheck, ssh);
-
-    if (protocol == Protocol::WebDav && m_remoteDirectoryEdit->text().isEmpty())
-        m_remoteDirectoryEdit->setPlaceholderText(QStringLiteral("WebDAV 根路径，例如 /dav/"));
-    else
-        m_remoteDirectoryEdit->setPlaceholderText(QStringLiteral("留空表示主目录"));
 }
 
 void SessionEditor::updatePortForProtocol()
@@ -295,8 +265,6 @@ void SessionEditor::setSession(const SessionData &session)
     m_passwordEdit->setText(session.password);
     m_keyEdit->setText(session.privateKeyFile);
     m_passphraseEdit->setText(session.passphrase);
-    m_remoteDirectoryEdit->setText(session.remoteDirectory);
-    m_localDirectoryEdit->setText(session.localDirectory);
     m_savePasswordCheck->setChecked(session.savePassword);
     m_passiveCheck->setChecked(session.passiveMode);
     {
@@ -327,12 +295,6 @@ SessionData SessionEditor::session() const
         data.privateKeyFile = m_keyEdit->text().trimmed();
         data.passphrase = m_passphraseEdit->text();
     }
-    data.remoteDirectory = m_remoteDirectoryEdit->text().trimmed();
-    if ((data.protocol == Protocol::Ftp || data.protocol == Protocol::Ftps ||
-         data.protocol == Protocol::WebDav) &&
-        data.remoteDirectory.isEmpty())
-        data.remoteDirectory = QStringLiteral("/");
-    data.localDirectory = m_localDirectoryEdit->text().trimmed();
     data.savePassword = m_savePasswordCheck->isChecked();
     data.passiveMode = m_passiveCheck->isChecked();
     data.implicitTls = m_implicitTlsCheck->isChecked();

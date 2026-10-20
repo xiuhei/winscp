@@ -103,6 +103,12 @@ TransferManager::~TransferManager()
     shutdown();
 }
 
+bool TransferManager::opensFile(int id) const
+{
+    const auto task = m_byId.value(id);
+    return task && task->openWhenDone;
+}
+
 void TransferManager::setParallelLimit(int limit)
 {
     m_parallelLimit = qBound(1, limit, 8);

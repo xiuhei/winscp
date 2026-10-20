@@ -46,8 +46,6 @@ private:
     QLineEdit *m_keyEdit = nullptr;
     QWidget *m_passphraseRow = nullptr;
     QLineEdit *m_passphraseEdit = nullptr;
-    QLineEdit *m_remoteDirectoryEdit = nullptr;
-    QLineEdit *m_localDirectoryEdit = nullptr;
     QCheckBox *m_savePasswordCheck = nullptr;
     QCheckBox *m_passiveCheck = nullptr;
     QCheckBox *m_implicitTlsCheck = nullptr;

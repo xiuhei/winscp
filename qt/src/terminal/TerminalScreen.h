@@ -78,6 +78,8 @@ public:
     QByteArray takeResponses();
     bool takeBell();
     bool takeTitleChanged();
+    QStringList takeWorkingDirectories();
+    QString takeShellName();
     QString title() const { return m_title; }
 
     int scrollbackCount() const { return m_scrollback.size(); }
@@ -202,6 +204,8 @@ private:
     QString m_csiIntermediate;
     QChar m_csiPrivate;
     QByteArray m_oscBuffer;
+    QStringList m_workingDirectories;
+    QString m_shellName;
     QByteArray m_responses;
     bool m_bell = false;
     bool m_titleChanged = false;

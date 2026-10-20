@@ -36,6 +36,7 @@ struct FileInfo {
     QDateTime accessed;
     quint32 mode = 0; // POSIX mode bits when available
     bool isDir = false;
+    bool isParent = false;
     bool isSymlink = false;
     bool isHidden = false;
     bool isExecutable = false;

@@ -21,6 +21,7 @@ public:
     static QString knownHostsFile();
     static QString settingsFile();
     static QString cacheDir();
+    static QString downloadCacheDir();
     static QString tempDir();
     static QString themeFile(const QString &name);
     static bool isPortable();

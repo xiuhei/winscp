@@ -26,6 +26,7 @@ private:
     QCheckBox *m_confirmExitCheck = nullptr;
     QCheckBox *m_savePasswordsCheck = nullptr;
     QCheckBox *m_askHostKeyCheck = nullptr;
+    QSpinBox *m_cacheDaysSpin = nullptr;
     QSpinBox *m_parallelSpin = nullptr;
     QComboBox *m_conflictCombo = nullptr;
     QCheckBox *m_preserveTimesCheck = nullptr;

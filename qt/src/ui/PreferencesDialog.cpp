@@ -90,6 +90,12 @@ PreferencesDialog::PreferencesDialog(QWidget *parent)
     m_preservePermissionsCheck = new QCheckBox(QStringLiteral("上传时保留 Unix 权限"), transferPage);
     m_preservePermissionsCheck->setChecked(settings.preservePermissions);
     transferForm->addRow(QString(), m_preservePermissionsCheck);
+    m_cacheDaysSpin = new QSpinBox(transferPage);
+    m_cacheDaysSpin->setObjectName(QStringLiteral("CacheRetentionDays"));
+    m_cacheDaysSpin->setRange(1, 3650);
+    m_cacheDaysSpin->setValue(settings.cacheRetentionDays);
+    m_cacheDaysSpin->setSuffix(QStringLiteral(" 天"));
+    transferForm->addRow(QStringLiteral("远程打开缓存保留："), m_cacheDaysSpin);
     tabs->addTab(transferPage, QStringLiteral("传输"));
 
     auto *terminalPage = new QWidget(tabs);
@@ -173,6 +179,7 @@ void PreferencesDialog::accept()
     settings.confirmExit = m_confirmExitCheck->isChecked();
     settings.savePasswords = m_savePasswordsCheck->isChecked();
     settings.askUnknownHostKey = m_askHostKeyCheck->isChecked();
+    settings.cacheRetentionDays = m_cacheDaysSpin->value();
     settings.parallelTransfers = m_parallelSpin->value();
     settings.conflictPolicy = m_conflictCombo->currentData().toString();
     settings.preserveTimestamps = m_preserveTimesCheck->isChecked();

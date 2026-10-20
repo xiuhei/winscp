@@ -37,6 +37,7 @@ public:
     void renameEntry(const QString &from, const QString &to);
     void setPermissions(const QString &path, quint32 mode);
     void readFile(const QString &path);
+    void statFile(const QString &path, quint64 requestId = 0);
     void writeFile(const QString &path, const QByteArray &data);
     void createSymlink(const QString &target, const QString &linkPath);
 
@@ -61,6 +62,7 @@ signals:
 
     void operationFinished(const QString &action, bool success, const QString &message);
     void fileRead(const QString &path, const QByteArray &data);
+    void fileStated(quint64 requestId, const wsc::SessionData &session, const QString &path, const wsc::FileInfo &info, const QString &error);
     void fileWriteFinished(const QString &path, bool success, const QString &message);
     void symlinkCreated(const QString &linkPath, bool success, const QString &message);
 

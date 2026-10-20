@@ -3,7 +3,8 @@ param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Debug",
     [string]$QtRoot = $env:DBGATE_QT_ROOT,
-    [string]$VcpkgRoot = $env:VCPKG_ROOT
+    [string]$VcpkgRoot = $env:VCPKG_ROOT,
+    [string]$PackageName = "WinSCPQt-enhanced-win64"
 )
 
 $ErrorActionPreference = "Stop"
@@ -43,6 +44,15 @@ function Wait-Port([int]$Port) {
         $client = [System.Net.Sockets.TcpClient]::new()
         try {
             $client.Connect("127.0.0.1", $Port)
+            if ($Port -in @(22222, 22223)) {
+                $stream = $client.GetStream()
+                $stream.ReadTimeout = 500
+                $banner = New-Object byte[] 256
+                $count = $stream.Read($banner, 0, $banner.Length)
+                if (-not [Text.Encoding]::ASCII.GetString($banner, 0, $count).StartsWith("SSH-")) {
+                    throw "SSH service is not ready"
+                }
+            }
             return
         } catch {
             Start-Sleep -Milliseconds 150
@@ -91,13 +101,13 @@ try {
     Invoke-Smoke "shared SFTP connection" "WinSCPQtTerminalSmoke.exe" @($sftpUrl)
     Invoke-Smoke "shared SCP connection" "WinSCPQtTerminalSmoke.exe" @($scpUrl)
     Invoke-Smoke "OpenSSH PTY" "WinSCPQtTerminalSmoke.exe" @("sftp://test:test@127.0.0.1:22223/home/test", "--real")
-    Invoke-Smoke "automatic terminal and session switching" "WinSCPQtWindowTest.exe" @($sftpUrl, $urls.FTP)
+    Invoke-Smoke "automatic terminal and session switching" "WinSCPQtWindowTest.exe" @("sftp://test:test@127.0.0.1:22223/home/test", $urls.FTP)
     Invoke-Smoke "sync" "WinSCPQtSyncSmoke.exe" @($sftpUrl, (Join-Path $roots "sftp"))
     foreach ($name in @("SFTP", "SCP", "FTP", "FTPS", "WebDAV")) {
         $rootName = switch ($name) { SFTP { "sftp" } SCP { "sftp" } WebDAV { "dav" } default { $name.ToLower() } }
         Invoke-Smoke "transfer $name" "WinSCPQtTransferSmoke.exe" @($urls[$name], (Join-Path $roots $rootName))
     }
-    $packageDir = Join-Path $sourceRoot "dist/WinSCPQt-1.0.0-win64"
+    $packageDir = Join-Path $sourceRoot ("dist/" + $PackageName)
     if ($Configuration -eq "Release" -and (Test-Path -LiteralPath (Join-Path $packageDir "WinSCPQt.exe"))) {
         $developmentPath = $env:PATH
         $developmentPlatform = $env:QT_QPA_PLATFORM

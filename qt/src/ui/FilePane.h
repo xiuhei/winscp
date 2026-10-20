@@ -78,6 +78,7 @@ signals:
     void newSessionRequested();
     void siteManagerRequested();
     void terminalRequested(const QString &path);
+    void editRequested(const wsc::FileInfo &info);
     void openRequested(const wsc::FileInfo &info, bool remote);
     void uploadRequested(const QList<wsc::FileInfo> &entries);
     void downloadRequested(const QList<wsc::FileInfo> &entries);
@@ -124,6 +125,9 @@ private:
     void selectFirstRow();
 
     Role m_role = Role::Local;
+    QLabel *m_breadcrumbs = nullptr;
+    QStackedWidget *m_pathStack = nullptr;
+    QToolButton *m_autoRefreshButton = nullptr;
     QComboBox *m_pathCombo = nullptr;
     QToolButton *m_backButton = nullptr;
     QToolButton *m_forwardButton = nullptr;

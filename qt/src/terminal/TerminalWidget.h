@@ -47,6 +47,8 @@ public:
 signals:
     void inputReady(const QByteArray &data);
     void sizeChanged(int columns, int rows);
+    void shellDetected(const QString &shell);
+    void workingDirectoryChanged(const QString &directory);
     void titleChanged(const QString &title);
     void fontZoomRequested(int delta);
     void copyAvailableChanged(bool available);

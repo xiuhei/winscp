@@ -34,6 +34,7 @@ public:
     QVariant headerData(int section, Qt::Orientation orientation,
                         int role = Qt::DisplayRole) const override;
     Qt::ItemFlags flags(const QModelIndex &index) const override;
+    QStringList mimeTypes() const override;
 
     qint64 totalFileSize() const;
     int folderCount() const;

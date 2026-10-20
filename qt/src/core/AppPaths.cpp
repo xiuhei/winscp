@@ -97,6 +97,13 @@ QString AppPaths::cacheDir()
     return QDir(dataDir()).filePath(QStringLiteral("cache"));
 }
 
+QString AppPaths::downloadCacheDir()
+{
+    const QString root = !envHome().isEmpty() ? envHome()
+        : (g_applicationRoot.isEmpty() ? QCoreApplication::applicationDirPath() : g_applicationRoot);
+    return QDir(root).filePath(QStringLiteral("downloads"));
+}
+
 QString AppPaths::tempDir()
 {
     QString dir = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))

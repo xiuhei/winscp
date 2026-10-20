@@ -2,6 +2,7 @@
 
 #include "core/Logger.h"
 #include "core/Settings.h"
+#include "core/PathUtils.h"
 #include "core/FileSystemController.h"
 #include "terminal/SshShellSession.h"
 #include "terminal/TerminalWidget.h"
@@ -10,6 +11,8 @@
 
 #include <QApplication>
 #include <QFrame>
+#include <QFileInfo>
+#include <QProcess>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLabel>
@@ -91,6 +94,25 @@ void TerminalPanel::buildUi()
     toolbarLayout->addWidget(m_hintLabel, 1);
     toolbarLayout->addStretch(0);
 
+    m_syncButton = new QToolButton(toolbar);
+    m_syncButton->setObjectName(QStringLiteral("DirectorySyncButton"));
+    m_syncButton->setText(QStringLiteral("自动同步目录"));
+    m_syncButton->setToolTip(QStringLiteral("文件面板与当前终端双向同步目录；支持 Bash、Zsh 和 OSC 7。输入或运行命令时延迟到下次提示符。"));
+    m_syncButton->setCheckable(true);
+    m_syncButton->setAutoRaise(true);
+    m_syncButton->setChecked(Settings::instance().synchronizeDirectories);
+    toolbarLayout->addWidget(m_syncButton);
+    connect(m_syncButton, &QToolButton::toggled, this, [this](bool enabled) {
+        Settings::instance().synchronizeDirectories = enabled;
+        Settings::instance().save();
+        for (TabData &data : m_tabsData) {
+            data.pendingDirectory.clear();
+            if (enabled && data.connected)
+                installDirectoryIntegration(data);
+        }
+        if (enabled)
+            synchronizeToDirectory(m_browserDirectory);
+    });
     m_copyButton = makeToolButton(toolbar, QStringLiteral("copy"), QStringLiteral("复制选中内容 (Ctrl+Shift+C)"));
     m_pasteButton = makeToolButton(toolbar, QStringLiteral("paste"), QStringLiteral("粘贴 (Ctrl+Shift+V)"));
     m_clearButton = makeToolButton(toolbar, QStringLiteral("clear"), QStringLiteral("清屏"));
@@ -122,7 +144,14 @@ void TerminalPanel::buildUi()
     m_stack->setCurrentWidget(m_welcomePage);
     outer->addWidget(m_stack, 1);
 
-    connect(m_tabs, &QTabWidget::currentChanged, this, [this](int) { updateHint(); });
+    connect(m_tabs, &QTabWidget::currentChanged, this, [this](int index) {
+        updateHint();
+        if (!m_closing && directorySynchronizationEnabled() && index >= 0 && index < m_tabsData.size()) {
+            const QString directory = m_tabsData.at(index).directory;
+            if (!directory.isEmpty())
+                emit directoryChanged(directory);
+        }
+    });
     connect(m_tabs, &QTabWidget::tabBarDoubleClicked, this, [this](int index) {
         if (index >= 0)
             setTabTitle(index, m_tabsData.at(index).baseTitle);
@@ -299,7 +328,42 @@ void TerminalPanel::openForSession(const SessionData &session, const QString &in
     data.initialDirectory = initialDirectory;
     data.connected = false;
 
-    connect(terminal, &TerminalWidget::inputReady, ssh, &SshShellSession::writeData);
+    connect(terminal, &TerminalWidget::inputReady, this, [this, terminal, ssh](const QByteArray &input) {
+        for (TabData &data : m_tabsData)
+            if (data.widget == terminal)
+                data.atPrompt = false;
+        ssh->writeData(input);
+    });
+    connect(terminal, &TerminalWidget::shellDetected, this, [this, terminal](const QString &shell) {
+        for (TabData &data : m_tabsData) {
+            if (data.widget != terminal)
+                continue;
+            const auto configured = QProcess::splitCommand(Settings::instance().terminalShell);
+            data.shellName = QFileInfo(configured.isEmpty() ? shell : configured.first()).fileName();
+            installDirectoryIntegration(data);
+            break;
+        }
+    });
+    connect(terminal, &TerminalWidget::workingDirectoryChanged, this,
+            [this, terminal](const QString &directory) {
+        for (int index = 0; index < m_tabsData.size(); ++index) {
+            TabData &data = m_tabsData[index];
+            if (data.widget != terminal)
+                continue;
+            data.directory = path::normalizeRemote(directory);
+            data.atPrompt = true;
+            if (data.pendingDirectory == data.requestedDirectory)
+                data.pendingDirectory.clear();
+            data.requestedDirectory.clear();
+            if (directorySynchronizationEnabled() && index == currentTabIndex()) {
+                if (!data.pendingDirectory.isEmpty() && data.pendingDirectory != data.directory)
+                    sendPendingDirectory(data);
+                else
+                    emit directoryChanged(data.directory);
+            }
+            break;
+        }
+    });
     connect(terminal, &TerminalWidget::sizeChanged, ssh, &SshShellSession::resizePty);
     connect(terminal, &TerminalWidget::titleChanged, this, [this, terminal](const QString &title) {
         if (title.isEmpty())
@@ -326,6 +390,9 @@ void TerminalPanel::openForSession(const SessionData &session, const QString &in
                                                 .arg(shellQuote(initialDirectory));
                     ssh->writeData(command.toUtf8());
                 }
+                if (directorySynchronizationEnabled())
+                    item.pendingDirectory = m_browserDirectory;
+                ssh->writeData(QByteArrayLiteral(" printf '\\033]777;winscp-shell;%s\\007' \"$SHELL\"\r"));
                 break;
             }
         }
@@ -476,6 +543,65 @@ void TerminalPanel::applySettings()
     updateHint();
 }
 
+bool TerminalPanel::directorySynchronizationEnabled() const
+{
+    return m_syncButton->isChecked();
+}
+
+void TerminalPanel::setDirectorySynchronizationEnabled(bool enabled)
+{
+    m_syncButton->setChecked(enabled);
+}
+
+void TerminalPanel::installDirectoryIntegration(TabData &data)
+{
+    if (data.integrationInstalled || !data.session || data.shellName.isEmpty())
+        return;
+    const QString report = QStringLiteral("printf '\\033]777;winscp-cwd;%s\\007' \"$PWD\"");
+    QString command;
+    if (data.shellName == QLatin1String("bash") || data.shellName == QLatin1String("zsh")) {
+        command = QStringLiteral(" __winscp_pwd() { local __winscp_status=$?; %1; return $__winscp_status; }; ").arg(report);
+        command += data.shellName == QLatin1String("bash")
+            ? QStringLiteral("PROMPT_COMMAND+=(__winscp_pwd)")
+            : QStringLiteral("precmd_functions+=(__winscp_pwd)");
+    } else if (data.shellName == QLatin1String("fish")) {
+        command = QStringLiteral(" function __winscp_pwd --on-event fish_prompt; %1; end").arg(report);
+    } else if (data.shellName == QLatin1String("sh") || data.shellName == QLatin1String("dash") ||
+               data.shellName == QLatin1String("ksh")) {
+        command = QStringLiteral(" PS1=%1\"$PS1\"").arg(shellQuote(QStringLiteral("$(%1)").arg(report)));
+    } else {
+        if (directorySynchronizationEnabled())
+            emit statusMessage(QStringLiteral("当前 Shell 需要提供 OSC 7 目录报告才能自动同步。"));
+        return;
+    }
+    // Prompt hooks live only in this shell and preserve its existing prompt.
+    data.integrationInstalled = true;
+    data.session->writeData((command + QStringLiteral("; printf '\\033[H\\033[2J\\033[3J'\r")).toUtf8());
+}
+
+void TerminalPanel::sendPendingDirectory(TabData &data)
+{
+    if (!data.atPrompt || !data.connected || !data.session || data.pendingDirectory.isEmpty() ||
+        data.widget->screen()->usingAlternateScreen())
+        return;
+    data.requestedDirectory = data.pendingDirectory;
+    data.atPrompt = false;
+    data.session->writeData(QStringLiteral(" cd -- %1\r").arg(shellQuote(data.pendingDirectory)).toUtf8());
+}
+
+void TerminalPanel::synchronizeToDirectory(const QString &directory)
+{
+    m_browserDirectory = directory;
+    const int index = currentTabIndex();
+    if (!directorySynchronizationEnabled() || index < 0 || directory.isEmpty())
+        return;
+    TabData &data = m_tabsData[index];
+    if (data.directory == directory)
+        return;
+    data.pendingDirectory = directory;
+    sendPendingDirectory(data);
+}
+
 void TerminalPanel::focusTerminal()
 {
     if (TerminalWidget *terminal = currentTerminal())
@@ -486,6 +612,8 @@ void TerminalPanel::focusTerminal()
 
 void TerminalPanel::closeAll()
 {
+    m_closing = true;
+    m_browserDirectory.clear();
     for (int index = m_tabsData.size() - 1; index >= 0; --index) {
         TabData data = m_tabsData.takeAt(index);
         if (data.session) {
@@ -496,6 +624,7 @@ void TerminalPanel::closeAll()
     }
     if (m_tabs)
         m_tabs->clear();
+    m_closing = false;
     m_stack->setCurrentWidget(m_welcomePage);
     m_closeButton->setEnabled(false);
     m_reconnectButton->setEnabled(false);

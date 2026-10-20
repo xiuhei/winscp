@@ -27,7 +27,8 @@ $resolvedDistRoot = [IO.Path]::GetFullPath($distRoot).TrimEnd('\') + '\'
 if (-not $resolvedPackageDir.StartsWith($resolvedDistRoot, [StringComparison]::OrdinalIgnoreCase)) {
     throw "Package path must remain inside the distribution directory"
 }
-if (Test-Path -LiteralPath (Join-Path $packageDir "data")) {
+if ((Test-Path -LiteralPath (Join-Path $packageDir "data")) -or
+    (Test-Path -LiteralPath (Join-Path $packageDir "downloads"))) {
     throw "The package directory contains user data. Move it before rebuilding the package."
 }
 if (Test-Path -LiteralPath $packageDir) { Remove-Item -LiteralPath $packageDir -Recurse -Force }

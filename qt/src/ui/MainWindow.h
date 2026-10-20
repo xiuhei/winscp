@@ -20,6 +20,7 @@ class QToolBar;
 
 namespace wsc {
 
+class RemoteFileOpener;
 class FilePane;
 class FileSystemController;
 class TerminalPanel;
@@ -111,6 +112,7 @@ private:
     QSplitter *m_mainSplitter = nullptr;
     TerminalPanel *m_terminalPanel = nullptr;
     FileSystemController *m_remoteFs = nullptr;
+    RemoteFileOpener *m_fileOpener = nullptr;
     TransferManager *m_transferManager = nullptr;
     TransferQueueWidget *m_queueWidget = nullptr;
     QDockWidget *m_queueDock = nullptr;

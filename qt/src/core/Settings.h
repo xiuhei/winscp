@@ -27,6 +27,9 @@ public:
     bool confirmOverwrite = true;
     QString conflictPolicy = QStringLiteral("ask"); // ask | overwrite | skip | resume
     int parallelTransfers = 2;
+    int cacheRetentionDays = 7;
+    bool autoRefresh = false;
+    bool synchronizeDirectories = false;
     bool preserveTimestamps = true;
     bool preservePermissions = true;
     bool showTransferQueue = true;
@@ -57,6 +60,8 @@ public:
     void addRecentSession(const SessionData &session);
     void removeRecentSession(const SessionData &session);
     void clearRecentSessions();
+    void rememberDirectories(const SessionData &session, const QString &local, const QString &remote);
+    SessionData restoreDirectories(const SessionData &session) const;
 
 private:
     Settings() = default;

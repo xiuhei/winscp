@@ -5,6 +5,7 @@
 #include "core/PasswordStore.h"
 
 #include <QDir>
+#include <QCryptographicHash>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -52,6 +53,9 @@ Settings &Settings::instance()
 void Settings::load()
 {
     QSettings store(AppPaths::settingsFile(), QSettings::IniFormat);
+    cacheRetentionDays = qBound(1, store.value(QStringLiteral("transfer/cacheRetentionDays"), 7).toInt(), 3650);
+    autoRefresh = store.value(QStringLiteral("ui/autoRefresh"), false).toBool();
+    synchronizeDirectories = store.value(QStringLiteral("terminal/synchronizeDirectories"), false).toBool();
     theme = store.value(QStringLiteral("ui/theme"), theme).toString();
     showHiddenFiles = store.value(QStringLiteral("ui/showHidden"), showHiddenFiles).toBool();
     confirmDelete = store.value(QStringLiteral("ui/confirmDelete"), confirmDelete).toBool();
@@ -105,6 +109,9 @@ void Settings::save()
 {
     AppPaths::ensureDirectories();
     QSettings store(AppPaths::settingsFile(), QSettings::IniFormat);
+    store.setValue(QStringLiteral("transfer/cacheRetentionDays"), cacheRetentionDays);
+    store.setValue(QStringLiteral("ui/autoRefresh"), autoRefresh);
+    store.setValue(QStringLiteral("terminal/synchronizeDirectories"), synchronizeDirectories);
     store.setValue(QStringLiteral("ui/theme"), theme);
     store.setValue(QStringLiteral("ui/showHidden"), showHiddenFiles);
     store.setValue(QStringLiteral("ui/confirmDelete"), confirmDelete);
@@ -135,6 +142,40 @@ void Settings::save()
     store.setValue(QStringLiteral("session/keepAlive"), keepAlive);
     store.sync();
     saveRecent();
+}
+
+namespace {
+QString directoryKey(const SessionData &session)
+{
+    const QJsonArray values{session.siteName, protocolId(session.protocol), session.hostName.toLower(),
+                            session.port, session.userName, session.webDavHttps};
+    return QStringLiteral("directories/") + QString::fromLatin1(QCryptographicHash::hash(
+        QJsonDocument(values).toJson(QJsonDocument::Compact), QCryptographicHash::Sha256).toHex());
+}
+}
+
+void Settings::rememberDirectories(const SessionData &session, const QString &local, const QString &remote)
+{
+    if (!session.isValid() || remote.isEmpty())
+        return;
+    QSettings store(AppPaths::settingsFile(), QSettings::IniFormat);
+    store.beginGroup(directoryKey(session));
+    store.setValue(QStringLiteral("local"), local);
+    store.setValue(QStringLiteral("remote"), remote);
+}
+
+SessionData Settings::restoreDirectories(const SessionData &session) const
+{
+    QSettings store(AppPaths::settingsFile(), QSettings::IniFormat);
+    store.beginGroup(directoryKey(session));
+    SessionData result = session;
+    const QString local = store.value(QStringLiteral("local")).toString();
+    if (QDir(local).exists() && !local.isEmpty())
+        result.localDirectory = local;
+    const QString remote = store.value(QStringLiteral("remote")).toString();
+    if (!remote.isEmpty())
+        result.remoteDirectory = remote;
+    return result;
 }
 
 void Settings::addRecentSession(const SessionData &session)
