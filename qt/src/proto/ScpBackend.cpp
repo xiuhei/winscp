@@ -197,8 +197,6 @@ void ScpBackend::disconnect()
 QString ScpBackend::shellQuote(const QString &value) const
 {
     QString cleaned = value;
-    cleaned.remove(QLatin1Char('\r'));
-    cleaned.remove(QLatin1Char('\n'));
     cleaned.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
     return QStringLiteral("'%1'").arg(cleaned);
 }
@@ -249,7 +247,7 @@ bool ScpBackend::readChannel(LIBSSH2_CHANNEL *channel,
                 }
             }
         }
-        if (libssh2_channel_eof(channel))
+        if (!received && libssh2_channel_eof(channel))
             return true;
         if (received)
             inactivity.restart();
@@ -342,7 +340,8 @@ bool ScpBackend::parseListLine(const QString &line, const QString &directory, Fi
     }
     QString name = match.captured(6);
     QString linkTarget;
-    const int arrow = name.indexOf(QStringLiteral(" -> "));
+    const int arrow = match.captured(1).startsWith(QLatin1Char('l'))
+        ? name.indexOf(QStringLiteral(" -> ")) : -1;
     if (arrow >= 0) {
         linkTarget = name.mid(arrow + 4);
         name = name.left(arrow);
@@ -404,22 +403,18 @@ bool ScpBackend::list(const QString &pathValue, FileList *out, QString *error)
 
     const QStringList lines = QString::fromUtf8(output).split(QLatin1Char('\n'),
                                                               Qt::SkipEmptyParts);
-    int parsed = 0;
     for (const QString &line : lines) {
         if (line.trimmed().isEmpty() || line.startsWith(QLatin1String("total ")))
             continue;
         FileInfo info;
         if (parseListLine(line, directory, &info, nullptr)) {
-            ++parsed;
             out->append(info);
-        } else {
-            Logger::instance().debug(QStringLiteral("无法解析 SCP 列表行：%1").arg(line));
+        } else if (!line.endsWith(QStringLiteral(" .")) && !line.endsWith(QStringLiteral(" .."))) {
+            out->clear();
+            if (error)
+                *error = QStringLiteral("无法完整解析远程目录列表：%1").arg(directory);
+            return false;
         }
-    }
-    if (parsed == 0 && !lines.isEmpty()) {
-        if (error)
-            *error = QStringLiteral("无法解析远程目录列表：%1").arg(directory);
-        return false;
     }
     if (error)
         error->clear();
@@ -457,6 +452,7 @@ bool ScpBackend::stat(const QString &pathValue, FileInfo *out, QString *error)
     if (!parseListLine(line, parent, &info, error))
         return false;
     info.path = normalized;
+    info.name = path::remoteName(normalized);
     *out = info;
     return true;
 }
@@ -539,7 +535,13 @@ bool ScpBackend::writeFile(const QString &pathValue, const QByteArray &data, QSt
             *error = QStringLiteral("无法创建临时文件：%1").arg(file.errorString());
         return false;
     }
-    file.write(data);
+    if (file.write(data) != data.size() || !file.flush()) {
+        if (error)
+            *error = QStringLiteral("无法写入临时文件：%1").arg(file.errorString());
+        file.close();
+        QFile::remove(tempPath);
+        return false;
+    }
     file.close();
     const bool ok = uploadFile(tempPath, pathValue, nullptr, nullptr, error);
     QFile::remove(tempPath);
@@ -610,6 +612,13 @@ bool ScpBackend::downloadStream(const QString &remotePath, const QString &localP
         if (error)
             *error = commandError(QStringLiteral("cat -- %1").arg(shellQuote(remote)), stderrData,
                                   exitCode);
+        return false;
+    }
+    if (totalHint >= 0 && done < totalHint) {
+        output.cancelWriting();
+        if (error)
+            *error = QStringLiteral("下载文件不完整：收到 %1 字节，预期至少 %2 字节。")
+                         .arg(done).arg(totalHint);
         return false;
     }
     if (!output.commit()) {

@@ -15,6 +15,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QSaveFile>
+#include <QSet>
 #include <QSslConfiguration>
 #include <QSslError>
 #include <QTimeZone>
@@ -49,44 +50,87 @@ QDateTime parseHttpDate(const QString &value)
 
 struct DavItem {
     QString href;
-    QString name;
     bool isDir = false;
     qint64 size = 0;
     QDateTime modified;
 };
 
-QList<DavItem> parseResponses(const QByteArray &xml)
+bool parseResponses(const QByteArray &xml, QList<DavItem> *items, QString *error)
 {
-    QList<DavItem> items;
     QXmlStreamReader reader(xml);
-    DavItem current;
-    bool inResponse = false;
-
-    while (!reader.atEnd()) {
-        reader.readNext();
-        if (reader.isStartElement()) {
-            const QString name = reader.name().toString();
-            if (name == QLatin1String("response")) {
-                current = DavItem();
-                inResponse = true;
-            } else if (inResponse && name == QLatin1String("href")) {
-                current.href = reader.readElementText().trimmed();
-            } else if (inResponse && name == QLatin1String("displayname")) {
-                current.name = reader.readElementText().trimmed();
-            } else if (inResponse && name == QLatin1String("getcontentlength")) {
-                current.size = reader.readElementText().trimmed().toLongLong();
-            } else if (inResponse && name == QLatin1String("getlastmodified")) {
-                current.modified = parseHttpDate(reader.readElementText().trimmed());
-            } else if (inResponse && name == QLatin1String("collection")) {
-                current.isDir = true;
-            }
-        } else if (reader.isEndElement() && reader.name() == QLatin1String("response")) {
-            if (!current.href.isEmpty())
-                items.append(current);
-            inResponse = false;
+    if (!reader.readNextStartElement() || reader.name() != QLatin1String("multistatus") ||
+        reader.namespaceUri() != QLatin1String("DAV:"))
+        reader.raiseError(QStringLiteral("缺少 DAV multistatus。"));
+    while (!reader.hasError() && reader.readNextStartElement()) {
+        if (reader.name() != QLatin1String("response") || reader.namespaceUri() != QLatin1String("DAV:")) {
+            reader.skipCurrentElement();
+            continue;
         }
+        DavItem current;
+        bool hasProperties = false;
+        while (reader.readNextStartElement()) {
+            if (reader.namespaceUri() != QLatin1String("DAV:")) {
+                reader.skipCurrentElement();
+            } else if (reader.name() == QLatin1String("href")) {
+                current.href = reader.readElementText().trimmed();
+            } else if (reader.name() == QLatin1String("propstat")) {
+                DavItem properties;
+                int status = 200;
+                bool hasSize = false;
+                bool hasType = false;
+                while (reader.readNextStartElement()) {
+                    if (reader.name() == QLatin1String("status")) {
+                        status = reader.readElementText().section(QLatin1Char(' '), 1, 1).toInt();
+                    } else if (reader.name() == QLatin1String("prop")) {
+                        while (reader.readNextStartElement()) {
+                            if (reader.namespaceUri() != QLatin1String("DAV:")) {
+                                reader.skipCurrentElement();
+                            } else if (reader.name() == QLatin1String("getcontentlength")) {
+                                properties.size = reader.readElementText().trimmed().toLongLong(&hasSize);
+                            } else if (reader.name() == QLatin1String("getlastmodified")) {
+                                properties.modified = parseHttpDate(reader.readElementText().trimmed());
+                            } else if (reader.name() == QLatin1String("resourcetype")) {
+                                hasType = true;
+                                while (reader.readNextStartElement()) {
+                                    properties.isDir |= reader.name() == QLatin1String("collection") &&
+                                                        reader.namespaceUri() == QLatin1String("DAV:");
+                                    reader.skipCurrentElement();
+                                }
+                            } else {
+                                reader.skipCurrentElement();
+                            }
+                        }
+                    } else {
+                        reader.skipCurrentElement();
+                    }
+                }
+                if (status >= 200 && status < 300) {
+                    hasProperties |= hasType;
+                    if (hasType)
+                        current.isDir = properties.isDir;
+                    if (hasSize)
+                        current.size = properties.size;
+                    if (properties.modified.isValid())
+                        current.modified = properties.modified;
+                }
+            } else {
+                reader.skipCurrentElement();
+            }
+        }
+        if (current.href.isEmpty() || !hasProperties)
+            reader.raiseError(QStringLiteral("资源属性缺失或读取失败。"));
+        else
+            items->append(current);
     }
-    return items;
+    while (!reader.atEnd())
+        reader.readNext();
+    if (reader.hasError()) {
+        items->clear();
+        if (error)
+            *error = QStringLiteral("WebDAV 属性响应无效：%1").arg(reader.errorString());
+        return false;
+    }
+    return true;
 }
 
 } // namespace
@@ -152,6 +196,12 @@ bool WebDavBackend::connect(const SessionData &session, QString *error)
                                                                      : session.remoteDirectory);
     HttpResult result = propFind(m_home, 0, error);
     if (result.status == 207 || result.status == 200) {
+        FileInfo root;
+        if (!parsePropFindSingle(result.body, result.effectiveUrl, &root, error) || !root.isDir) {
+            if (error && error->isEmpty())
+                *error = QStringLiteral("WebDAV 初始路径不是目录。");
+            return false;
+        }
         m_connected = true;
         Logger::instance().success(
             QStringLiteral("WebDAV 会话已建立：%1（根目录 %2）").arg(session.endpoint(), m_home));
@@ -311,15 +361,33 @@ bool WebDavBackend::parsePropFind(const QByteArray &xml, const QUrl &requestUrl,
     if (!out)
         return false;
     out->clear();
-    const QList<DavItem> items = parseResponses(xml);
+    QList<DavItem> items;
+    if (!parseResponses(xml, &items, error))
+        return false;
     const QString requestPath = pathFromHref(requestUrl, requestUrl.toString());
+    QUrl collectionUrl = requestUrl;
+    if (!collectionUrl.path().endsWith(QLatin1Char('/')))
+        collectionUrl.setPath(collectionUrl.path() + QLatin1Char('/'));
+    QSet<QString> paths;
+    bool hasCollection = false;
     for (const DavItem &item : items) {
-        const QString itemPath = pathFromHref(requestUrl, item.href);
-        if (itemPath == requestPath)
+        const QUrl resourceUrl = collectionUrl.resolved(QUrl(item.href));
+        const QString itemPath = pathFromHref(collectionUrl, item.href);
+        if (itemPath == requestPath) {
+            hasCollection |= item.isDir;
             continue;
+        }
+        if (resourceUrl.scheme() != requestUrl.scheme() || resourceUrl.authority() != requestUrl.authority() ||
+            path::remoteParent(itemPath) != requestPath || paths.contains(itemPath)) {
+            out->clear();
+            if (error)
+                *error = QStringLiteral("WebDAV 返回了重复资源或当前目录之外的路径。");
+            return false;
+        }
+        paths.insert(itemPath);
         FileInfo info;
         info.path = itemPath;
-        info.name = !item.name.isEmpty() ? item.name : path::remoteName(itemPath);
+        info.name = path::remoteName(itemPath);
         if (info.name.isEmpty() || info.name == QLatin1String("/"))
             info.name = path::remoteName(itemPath);
         info.isDir = item.isDir;
@@ -329,6 +397,12 @@ bool WebDavBackend::parsePropFind(const QByteArray &xml, const QUrl &requestUrl,
         info.isHidden = info.name.startsWith(QLatin1Char('.'));
         out->append(info);
     }
+    if (!hasCollection) {
+        out->clear();
+        if (error)
+            *error = QStringLiteral("WebDAV 未返回当前目录的集合属性。");
+        return false;
+    }
     if (error)
         error->clear();
     return true;
@@ -337,7 +411,9 @@ bool WebDavBackend::parsePropFind(const QByteArray &xml, const QUrl &requestUrl,
 bool WebDavBackend::parsePropFindSingle(const QByteArray &xml, const QUrl &requestUrl, FileInfo *out,
                                         QString *error)
 {
-    const QList<DavItem> items = parseResponses(xml);
+    QList<DavItem> items;
+    if (!parseResponses(xml, &items, error))
+        return false;
     const QString requestPath = pathFromHref(requestUrl, requestUrl.toString());
     for (const DavItem &item : items) {
         const QString itemPath = pathFromHref(requestUrl, item.href);
@@ -346,7 +422,7 @@ bool WebDavBackend::parsePropFindSingle(const QByteArray &xml, const QUrl &reque
         if (!out)
             break;
         out->path = itemPath;
-        out->name = !item.name.isEmpty() ? item.name : path::remoteName(itemPath);
+        out->name = path::remoteName(itemPath);
         out->isDir = item.isDir;
         out->size = item.isDir ? 0 : item.size;
         out->modified = item.modified;
@@ -375,7 +451,7 @@ bool WebDavBackend::list(const QString &pathValue, FileList *out, QString *error
             *error = httpErrorText(result, QStringLiteral("无法列出目录 %1").arg(normalized));
         return false;
     }
-    const QUrl requestUrl = urlForPath(normalized);
+    const QUrl requestUrl = result.effectiveUrl;
     return parsePropFind(result.body, requestUrl, out, error);
 }
 
@@ -390,7 +466,7 @@ bool WebDavBackend::stat(const QString &pathValue, FileInfo *out, QString *error
             *error = httpErrorText(result, QStringLiteral("无法获取 %1 的属性").arg(normalized));
         return false;
     }
-    return parsePropFindSingle(result.body, urlForPath(normalized), out, error);
+    return parsePropFindSingle(result.body, result.effectiveUrl, out, error);
 }
 
 bool WebDavBackend::mkdir(const QString &pathValue, QString *error)
@@ -509,7 +585,13 @@ bool WebDavBackend::writeFile(const QString &pathValue, const QByteArray &data, 
             *error = QStringLiteral("无法创建临时文件：%1").arg(file.errorString());
         return false;
     }
-    file.write(data);
+    if (file.write(data) != data.size() || !file.flush()) {
+        if (error)
+            *error = QStringLiteral("无法写入临时文件：%1").arg(file.errorString());
+        file.close();
+        QFile::remove(tempPath);
+        return false;
+    }
     file.close();
     const bool ok = uploadFile(tempPath, pathValue, nullptr, nullptr, error);
     QFile::remove(tempPath);
@@ -527,6 +609,11 @@ bool WebDavBackend::download(const QString &remotePath, const QString &localPath
                              const ProgressCallback &progress, CancelToken *cancel,
                              QString *error, qint64 maxBytes)
 {
+    if (cancel && cancel->load()) {
+        if (error)
+            *error = QStringLiteral("传输已取消。");
+        return false;
+    }
     const QString remote = path::normalizeRemote(remotePath);
     auto *manager = networkManager();
     QNetworkRequest request(urlForPath(remote));
@@ -603,6 +690,7 @@ bool WebDavBackend::download(const QString &remotePath, const QString &localPath
     loop.exec();
     inactivity.stop();
     cancelTimer.stop();
+    cancelled = cancelled || (cancel && cancel->load());
 
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     const QString networkError = reply->errorString();
@@ -616,7 +704,8 @@ bool WebDavBackend::download(const QString &remotePath, const QString &localPath
         }
     }
     const qint64 expected = reply->header(QNetworkRequest::ContentLengthHeader).toLongLong();
-    const bool complete = !reply->hasRawHeader("Content-Length") || output.pos() == expected;
+    const bool complete = (!reply->hasRawHeader("Content-Length") || output.pos() == expected) &&
+                          (totalHint < 0 || output.pos() >= totalHint);
     const bool networkOk = status >= 200 && status < 300 && !cancelled && !writeFailed &&
                            !timedOut && !tooLarge && complete &&
                            reply->error() == QNetworkReply::NoError;
@@ -658,6 +747,11 @@ bool WebDavBackend::download(const QString &remotePath, const QString &localPath
 bool WebDavBackend::uploadFile(const QString &localPath, const QString &remotePath,
                                const ProgressCallback &progress, CancelToken *cancel, QString *error)
 {
+    if (cancel && cancel->load()) {
+        if (error)
+            *error = QStringLiteral("传输已取消。");
+        return false;
+    }
     QFile input(localPath);
     if (!input.open(QIODevice::ReadOnly)) {
         if (error)
@@ -709,6 +803,7 @@ bool WebDavBackend::uploadFile(const QString &localPath, const QString &remotePa
     loop.exec();
     inactivity.stop();
     cancelTimer.stop();
+    cancelled = cancelled || (cancel && cancel->load());
 
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     const QString networkError = reply->errorString();

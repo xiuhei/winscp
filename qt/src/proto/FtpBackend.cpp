@@ -18,6 +18,8 @@
 #include <QSslSocket>
 #include <QTemporaryFile>
 #include <QThread>
+#include <QScopeGuard>
+#include <QUuid>
 #include <QTimeZone>
 
 #include <algorithm>
@@ -143,10 +145,7 @@ bool FtpBackend::isConnected() const
 
 QString FtpBackend::quote(const QString &path) const
 {
-    QString result = path;
-    result.remove(QLatin1Char('\r'));
-    result.remove(QLatin1Char('\n'));
-    return result;
+    return path;
 }
 
 bool FtpBackend::connect(const SessionData &session, QString *error)
@@ -334,7 +333,7 @@ bool FtpBackend::login(const SessionData &session, QString *error)
             if (upper.contains(QStringLiteral("MLSD")))
                 m_useMlsd = true;
             if (upper.contains(QStringLiteral("MLST")))
-                m_useMlst = true;
+                m_useMlst = m_useMlsd = true;
             if (upper.contains(QStringLiteral("EPSV")))
                 m_useEpsv = true;
             if (upper.contains(QStringLiteral("UTF8")))
@@ -426,7 +425,7 @@ bool FtpBackend::readReply(Reply *reply, QString *error)
         while (true) {
             if (!readLine(&line, error))
                 return false;
-            reply->lines.append(QString::fromUtf8(line.mid(4)));
+            reply->lines.append(QString::fromUtf8(line.startsWith(terminator) ? line.mid(4) : line));
             if (line.startsWith(terminator))
                 break;
         }
@@ -444,8 +443,11 @@ bool FtpBackend::sendCommand(const QString &command, Reply *reply, QString *erro
         return false;
     }
     QByteArray encoded = command.toUtf8();
-    encoded.replace("\r", QByteArray());
-    encoded.replace("\n", QByteArray());
+    if (encoded.contains('\r') || encoded.contains('\n') || encoded.contains('\0')) {
+        if (error)
+            *error = QStringLiteral("FTP 命令参数不能包含换行或空字符。");
+        return false;
+    }
     encoded.append("\r\n");
     if (m_control->write(encoded) < 0) {
         if (error)
@@ -453,7 +455,9 @@ bool FtpBackend::sendCommand(const QString &command, Reply *reply, QString *erro
         return false;
     }
     m_control->waitForBytesWritten(m_timeoutMs);
-    Logger::instance().debug(QStringLiteral("FTP > %1").arg(command));
+    const QString loggedCommand = command.startsWith(QStringLiteral("PASS "), Qt::CaseInsensitive)
+        ? QStringLiteral("PASS ********") : command;
+    Logger::instance().debug(QStringLiteral("FTP > %1").arg(loggedCommand));
     return readReply(reply, error);
 }
 
@@ -467,6 +471,18 @@ bool FtpBackend::expect(const QString &command, int expectedCode, Reply *reply, 
         if (error)
             *error = errorForReply(*target, QStringLiteral("命令 %1 失败").arg(command));
         return false;
+    }
+    return true;
+}
+
+bool FtpBackend::readTransferReply(Reply *reply, QString *error)
+{
+    if (!readReply(reply, error))
+        return false;
+    if (reply->code == 426) {
+        Reply completed;
+        if (!readReply(&completed, error))
+            return false;
     }
     return true;
 }
@@ -696,11 +712,6 @@ bool FtpBackend::readDataAll(QSslSocket *dataSocket, QByteArray *out, QString *e
         }
         if (dataSocket->state() == QAbstractSocket::UnconnectedState)
             break;
-        if (m_secure && !out->isEmpty()) {
-            if (!dataSocket->waitForReadyRead(800))
-                break;
-            continue;
-        }
         if (!dataSocket->waitForReadyRead(m_dataTimeoutMs)) {
             if (dataSocket->state() == QAbstractSocket::UnconnectedState)
                 break;
@@ -742,7 +753,7 @@ bool FtpBackend::runListCommand(const QString &command, QByteArray *data, int *r
         return false;
     }
     closeDataConnection(dataSocket);
-    if (!readReply(&reply, error))
+    if (!readTransferReply(&reply, error))
         return false;
     if (reply.code != 226 && reply.code != 250) {
         if (error)
@@ -754,7 +765,7 @@ bool FtpBackend::runListCommand(const QString &command, QByteArray *data, int *r
 
 bool FtpBackend::parseMlsdLine(const QString &line, const QString &directory, FileInfo *info)
 {
-    const QString trimmed = line.trimmed();
+    const QString trimmed = line;
     if (trimmed.isEmpty())
         return false;
     const int space = trimmed.indexOf(QLatin1Char(' '));
@@ -830,7 +841,8 @@ bool FtpBackend::parseUnixLine(const QString &line, const QString &directory, Fi
         return false;
     QString name = match.captured(6);
     QString linkTarget;
-    const int arrow = name.indexOf(QStringLiteral(" -> "));
+    const int arrow = match.captured(1).startsWith(QLatin1Char('l'))
+        ? name.indexOf(QStringLiteral(" -> ")) : -1;
     if (arrow >= 0) {
         linkTarget = name.mid(arrow + 4);
         name = name.left(arrow);
@@ -932,7 +944,15 @@ bool FtpBackend::parseList(const QByteArray &data, const QString &directory, Fil
         }
     }
     int parsed = 0;
+    static const QRegularExpression ignoredFacts(QStringLiteral("(?:^|;)type=(?:cdir|pdir);"),
+                                                QRegularExpression::CaseInsensitiveOption);
     for (const QString &line : lines) {
+        if (line.trimmed().isEmpty() || line.startsWith(QStringLiteral("total ")) ||
+            line.endsWith(QStringLiteral(" .")) || line.endsWith(QStringLiteral(" ..")) ||
+            (looksMlsd && ignoredFacts.match(line).hasMatch())) {
+            ++parsed;
+            continue;
+        }
         FileInfo info;
         bool ok = false;
         if (looksMlsd)
@@ -946,7 +966,10 @@ bool FtpBackend::parseList(const QByteArray &data, const QString &directory, Fil
                 out->append(info);
             ++parsed;
         } else if (!line.trimmed().isEmpty()) {
-            Logger::instance().debug(QStringLiteral("无法解析 FTP 列表行：%1").arg(line));
+            out->clear();
+            if (error)
+                *error = QStringLiteral("无法完整解析服务器返回的目录列表。");
+            return false;
         }
     }
     if (parsed == 0) {
@@ -1022,7 +1045,8 @@ bool FtpBackend::stat(const QString &pathValue, FileInfo *out, QString *error)
             reply.code == 250) {
             for (const QString &line : reply.lines) {
                 FileInfo info;
-                if (line.contains(QLatin1Char('=')) && parseMlsdLine(line.trimmed(), parent, &info)) {
+                if (line.contains(QLatin1Char('=')) &&
+                    parseMlsdLine(line.startsWith(QLatin1Char(' ')) ? line.mid(1) : line, parent, &info)) {
                     info.path = normalized;
                     *out = info;
                     if (error)
@@ -1264,8 +1288,6 @@ bool FtpBackend::retrToSink(const QString &remotePath, const std::function<bool(
             cancelled = true;
             break;
         }
-        if (m_secure && totalHint > 0 && done >= totalHint)
-            break;
         const qint64 available = dataSocket->bytesAvailable();
         if (available > 0) {
             const qint64 read = dataSocket->read(buffer, std::min<qint64>(available, static_cast<qint64>(sizeof(buffer))));
@@ -1282,11 +1304,6 @@ bool FtpBackend::retrToSink(const QString &remotePath, const std::function<bool(
         }
         if (dataSocket->state() == QAbstractSocket::UnconnectedState)
             break;
-        if (m_secure && done > 0) {
-            if (!dataSocket->waitForReadyRead(800))
-                break;
-            continue;
-        }
         if (!dataSocket->waitForReadyRead(m_dataTimeoutMs)) {
             if (dataSocket->state() == QAbstractSocket::UnconnectedState)
                 break;
@@ -1299,7 +1316,7 @@ bool FtpBackend::retrToSink(const QString &remotePath, const std::function<bool(
     closeDataConnection(dataSocket);
 
     Reply finalReply;
-    if (!readReply(&finalReply, error))
+    if (!readTransferReply(&finalReply, error))
         return false;
     if (cancelled) {
         if (error)
@@ -1314,6 +1331,12 @@ bool FtpBackend::retrToSink(const QString &remotePath, const std::function<bool(
     if (finalReply.code != 226 && finalReply.code != 250) {
         if (error)
             *error = errorForReply(finalReply, QStringLiteral("下载未完成"));
+        return false;
+    }
+    if (totalHint >= 0 && done < totalHint) {
+        if (error)
+            *error = QStringLiteral("下载文件不完整：收到 %1 字节，预期至少 %2 字节。")
+                         .arg(done).arg(totalHint);
         return false;
     }
     if (error)
@@ -1355,6 +1378,37 @@ bool FtpBackend::downloadFile(const QString &remotePath, const QString &localPat
 bool FtpBackend::uploadFile(const QString &localPath, const QString &remotePath,
                             const ProgressCallback &progress, CancelToken *cancel, QString *error)
 {
+    if (cancel && cancel->load()) {
+        if (error)
+            *error = QStringLiteral("传输已取消。");
+        return false;
+    }
+    const QString remote = path::normalizeRemote(remotePath);
+    FileInfo existing;
+    if (stat(remote, &existing, nullptr) && (existing.isDir || existing.isSymlink)) {
+        if (error)
+            *error = QStringLiteral("上传目标是目录或符号链接：%1").arg(remote);
+        return false;
+    }
+    const QString temporary = path::remoteJoin(path::remoteParent(remote),
+        QStringLiteral(".winscp-upload-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    auto cleanup = qScopeGuard([&] { removeFile(temporary, nullptr); });
+    if (!uploadStream(localPath, temporary, progress, cancel, error))
+        return false;
+    if (cancel && cancel->load()) {
+        if (error)
+            *error = QStringLiteral("传输已取消。");
+        return false;
+    }
+    if (!rename(temporary, remote, error))
+        return false;
+    cleanup.dismiss();
+    return true;
+}
+
+bool FtpBackend::uploadStream(const QString &localPath, const QString &remotePath,
+                              const ProgressCallback &progress, CancelToken *cancel, QString *error)
+{
     QFile input(localPath);
     if (!input.open(QIODevice::ReadOnly)) {
         if (error)
@@ -1390,7 +1444,11 @@ bool FtpBackend::uploadFile(const QString &localPath, const QString &remotePath,
             break;
         }
         const qint64 read = input.read(buffer.data(), buffer.size());
-        if (read <= 0)
+        if (read < 0) {
+            writeFailed = true;
+            break;
+        }
+        if (read == 0)
             break;
         qint64 offset = 0;
         while (offset < read) {
@@ -1405,11 +1463,13 @@ bool FtpBackend::uploadFile(const QString &localPath, const QString &remotePath,
                 break;
             }
             offset += written;
-            if (!dataSocket->waitForBytesWritten(m_dataTimeoutMs)) {
+            if (dataSocket->bytesToWrite() > 0 && !dataSocket->waitForBytesWritten(m_dataTimeoutMs)) {
                 Logger::instance().warning(
                     QStringLiteral("FTP 数据写入未完成：state=%1 error=%2")
                         .arg(static_cast<int>(dataSocket->state()))
                         .arg(dataSocket->errorString()));
+                writeFailed = true;
+                break;
             }
             dataSocket->flush();
         }
@@ -1421,10 +1481,9 @@ bool FtpBackend::uploadFile(const QString &localPath, const QString &remotePath,
     }
 
     if (cancelled || writeFailed) {
-        dataSocket->abort();
-        delete dataSocket;
-        Reply abortReply;
-        sendCommand(QStringLiteral("ABOR"), &abortReply, nullptr);
+        closeDataConnection(dataSocket);
+        Reply finalReply;
+        readTransferReply(&finalReply, nullptr);
         if (error) {
             *error = cancelled ? QStringLiteral("传输已取消。")
                                : QStringLiteral("写入 FTP 数据连接失败。");
@@ -1448,7 +1507,7 @@ bool FtpBackend::uploadFile(const QString &localPath, const QString &remotePath,
     delete dataSocket;
 
     Reply finalReply;
-    if (!readReply(&finalReply, error))
+    if (!readTransferReply(&finalReply, error))
         return false;
     Logger::instance().debug(QStringLiteral("FTP 上传完成响应：%1").arg(finalReply.code));
     if (finalReply.code != 226 && finalReply.code != 250) {

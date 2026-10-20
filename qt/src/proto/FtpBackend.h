@@ -74,6 +74,9 @@ private:
     bool retrToSink(const QString &remotePath, const std::function<bool(const char *, qint64)> &sink,
                     qint64 totalHint, const ProgressCallback &progress, CancelToken *cancel,
                     QString *error);
+    bool uploadStream(const QString &localPath, const QString &remotePath,
+                      const ProgressCallback &progress, CancelToken *cancel, QString *error);
+    bool readTransferReply(Reply *reply, QString *error);
     bool runListCommand(const QString &command, QByteArray *data, int *replyCode, QString *error);
     QString errorForReply(const Reply &reply, const QString &context) const;
     QString quote(const QString &path) const;

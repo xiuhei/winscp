@@ -44,7 +44,7 @@ public:
 private:
     KnownHosts();
     void loadLocked();
-    void saveLocked() const;
+    bool saveLocked(QString *error = nullptr) const;
 
     mutable QMutex m_mutex;
     QList<KnownHostKey> m_entries;

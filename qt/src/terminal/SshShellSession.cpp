@@ -144,7 +144,8 @@ void SshShellSession::poll()
                 m_outputInFlight += output.size();
             emit outputReady(output);
         }
-        eof = libssh2_channel_eof(m_channel) != 0;
+        eof = output.isEmpty() && (!m_outputBackpressure || m_outputInFlight < 256 * 1024) &&
+              libssh2_channel_eof(m_channel) != 0;
         if (eof)
             exitStatus = libssh2_channel_get_exit_status(m_channel);
     }

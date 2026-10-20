@@ -1,6 +1,7 @@
 #include "ui/TextEditorDialog.h"
 
 #include "core/PathUtils.h"
+#include "core/Backend.h"
 #include "core/Logger.h"
 #include "ui/IconProvider.h"
 #include "ui/Theme.h"
@@ -112,17 +113,16 @@ TextEditorDialog::TextEditorDialog(const QString &remotePath, const QByteArray &
     layout->addLayout(statusRow);
 
     auto *buttons = new QDialogButtonBox(this);
-    auto *saveButton = buttons->addButton(QStringLiteral("保存并上传"), QDialogButtonBox::AcceptRole);
-    saveButton->setVisible(!readOnly);
-    saveButton->setProperty("accent", true);
-    auto *cancelButton = buttons->addButton(readOnly ? QStringLiteral("关闭") : QStringLiteral("取消"), QDialogButtonBox::RejectRole);
+    m_saveButton = buttons->addButton(QStringLiteral("保存并上传"), QDialogButtonBox::AcceptRole);
+    m_saveButton->setVisible(!readOnly);
+    m_saveButton->setProperty("accent", true);
+    m_cancelButton = buttons->addButton(readOnly ? QStringLiteral("关闭") : QStringLiteral("取消"), QDialogButtonBox::RejectRole);
     layout->addWidget(buttons);
 
     connect(buttons, &QDialogButtonBox::accepted, this, &TextEditorDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &TextEditorDialog::reject);
     connect(m_editor->document(), &QTextDocument::modificationChanged, this, [this](bool modified) {
         m_modifiedLabel->setText(modified ? QStringLiteral("● 未保存") : QString());
-        setWindowModified(modified);
         setWindowTitle(QStringLiteral("%1%2 - 编辑器")
                            .arg(path::remoteName(m_path), modified ? QStringLiteral(" *") : QString()));
     });
@@ -152,6 +152,8 @@ TextEditorDialog::TextEditorDialog(const QString &remotePath, const QByteArray &
 
 QByteArray TextEditorDialog::content() const
 {
+    if (!m_editor->document()->isModified())
+        return m_original;
     QByteArray result = m_editor->toPlainText().toUtf8();
     if (m_crlf)
         result.replace("\n", "\r\n");
@@ -162,14 +164,45 @@ QByteArray TextEditorDialog::content() const
 
 void TextEditorDialog::accept()
 {
+    if (m_saving)
+        return;
     if (m_editor->isReadOnly() || content() == m_original)
         QDialog::reject();
-    else
+    else {
+        const QByteArray data = content();
+        if (data.size() > MaxEditorBytes) {
+            m_statusLabel->setText(QStringLiteral("内容超过编辑器的 32 MB 限制，无法上传。"));
+            return;
+        }
+        m_saving = true;
+        m_editor->setReadOnly(true);
+        m_saveButton->setEnabled(false);
+        m_cancelButton->setEnabled(false);
+        m_statusLabel->setText(QStringLiteral("正在保存并上传…"));
+        emit saveRequested(data);
+    }
+}
+
+void TextEditorDialog::finishSave(bool success, const QString &message)
+{
+    if (!m_saving)
+        return;
+    m_saving = false;
+    if (success) {
+        m_editor->document()->setModified(false);
         QDialog::accept();
+    } else {
+        m_editor->setReadOnly(false);
+        m_saveButton->setEnabled(true);
+        m_cancelButton->setEnabled(true);
+        m_statusLabel->setText(message);
+    }
 }
 
 void TextEditorDialog::reject()
 {
+    if (m_saving)
+        return;
     if (m_editor->document()->isModified()) {
         const auto answer = QMessageBox::question(
             this, QStringLiteral("放弃更改"),

@@ -3,6 +3,7 @@
 #include "core/AppPaths.h"
 #include "core/KnownHosts.h"
 #include "core/Logger.h"
+#include "core/Settings.h"
 
 #include <QDir>
 #include <QFile>
@@ -163,6 +164,11 @@ HostKeyVerifier defaultVerifier()
         if (status == HostKeyStatus::Match)
             return true;
         if (status == HostKeyStatus::Unknown) {
+            if (Settings::instance().askUnknownHostKey) {
+                if (error)
+                    *error = QStringLiteral("未知 SSH 主机密钥，请先在文件面板连接并确认服务器身份。");
+                return false;
+            }
             Logger::instance().warning(
                 QStringLiteral("首次连接 %1:%2，主机密钥为 %3。已自动信任并保存。")
                     .arg(info.host)

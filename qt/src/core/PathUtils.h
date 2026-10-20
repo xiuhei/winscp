@@ -49,6 +49,7 @@ QString formatDateTime(const QDateTime &dateTime);
 QString formatCount(qint64 count);
 
 QString safeRemoteFileName(const QString &name);
+bool isSafeLocalTarget(const QString &root, const QString &target);
 bool wildcardMatch(const QString &pattern, const QString &text);
 
 } // namespace path

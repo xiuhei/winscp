@@ -635,17 +635,19 @@ bool SftpBackend::downloadFile(const QString &remotePath, const QString &localPa
             *error = QStringLiteral("传输已取消。");
         return false;
     }
+    if (totalHint >= 0 && done < totalHint) {
+        output.cancelWriting();
+        if (error)
+            *error = QStringLiteral("下载文件不完整：收到 %1 字节，预期至少 %2 字节。")
+                         .arg(done).arg(totalHint);
+        return false;
+    }
     if (!output.commit()) {
         if (error)
             *error = QStringLiteral("无法完成本地文件写入：%1").arg(output.errorString());
         return false;
     }
 
-    if ((attributes.flags & LIBSSH2_SFTP_ATTR_ACMODTIME) && attributes.mtime > 0) {
-        QFile local(localPath);
-        if (local.open(QIODevice::ReadWrite))
-            local.setFileTime(dateFromSeconds(attributes.mtime), QFileDevice::FileModificationTime);
-    }
     if (error)
         error->clear();
     return true;

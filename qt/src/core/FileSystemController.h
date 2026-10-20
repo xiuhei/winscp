@@ -42,6 +42,7 @@ public:
     void createSymlink(const QString &target, const QString &linkPath);
 
     bool isConnected() const { return m_connected; }
+    quint64 connectionId() const { return m_generation; }
     bool isConnecting() const { return m_connecting; }
     bool isBusy() const { return m_busy; }
     QString currentPath() const { return m_currentPath; }

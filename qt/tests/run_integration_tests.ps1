@@ -96,6 +96,11 @@ try {
     foreach ($name in @("SFTP", "SCP", "FTP", "FTPS", "WebDAV")) {
         Invoke-Smoke "backend $name" "WinSCPQtBackendSmoke.exe" @($urls[$name], $uploadFile, "/upload-$name.txt")
     }
+    Invoke-Smoke "OpenSSH SFTP integrity" "WinSCPQtBackendSmoke.exe" @("sftp://test:test@127.0.0.1:22223/home/test")
+    Invoke-Smoke "OpenSSH SCP integrity" "WinSCPQtBackendSmoke.exe" @("scp://test:test@127.0.0.1:22223/home/test")
+    Invoke-Smoke "core regressions" "WinSCPQtCoreRegressionTest.exe" @("-o", "-,txt")
+    Invoke-Smoke "runtime regressions" "WinSCPQtRuntimeTest.exe" @("-o", "-,txt")
+    Invoke-Smoke "UI workflows" "WinSCPQtUiWorkflowTest.exe" @("-o", "-,txt")
     Invoke-Smoke "terminal screen" "WinSCPQtTerminalScreenTest.exe" @("-o", "-,txt")
     Invoke-Smoke "terminal keyboard" "WinSCPQtTerminalWidgetTest.exe" @("-o", "-,txt")
     Invoke-Smoke "shared SFTP connection" "WinSCPQtTerminalSmoke.exe" @($sftpUrl)
@@ -139,7 +144,7 @@ try {
     Write-Host "Artifacts: $workRoot"
 } finally {
     if ($started) {
-        docker logs $containerName *> (Join-Path $workRoot "servers.log")
+        docker logs --tail 10000 $containerName *> (Join-Path $workRoot "servers.log")
         docker rm -f $containerName | Out-Null
     }
     $env:PATH = $originalPath

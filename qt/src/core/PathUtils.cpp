@@ -16,11 +16,9 @@ namespace {
 QString normalizePosix(const QString &input, bool absolute)
 {
     QString value = input;
-    value.replace(QLatin1Char('\\'), QLatin1Char('/'));
     while (value.contains(QStringLiteral("//")))
         value.replace(QStringLiteral("//"), QStringLiteral("/"));
 
-    const bool trailingSlash = value.size() > 1 && value.endsWith(QLatin1Char('/'));
     const bool wasAbsolute = value.startsWith(QLatin1Char('/'));
     const QStringList parts = value.split(QLatin1Char('/'), Qt::SkipEmptyParts);
 
@@ -44,8 +42,6 @@ QString normalizePosix(const QString &input, bool absolute)
     }
     if (result.isEmpty())
         result = absolute ? QStringLiteral("/") : QString();
-    if (trailingSlash && result != QLatin1String("/") && !result.endsWith(QLatin1Char('/')))
-        result.append(QLatin1Char('/'));
     return result;
 }
 
@@ -68,7 +64,7 @@ QString humanSize(qint64 bytes)
 
 QString normalizeRemote(const QString &input)
 {
-    QString value = input.trimmed();
+    QString value = input;
     if (value.isEmpty())
         return QStringLiteral("/");
     return normalizePosix(value, true);
@@ -78,7 +74,7 @@ QString remoteJoin(const QString &directory, const QString &child)
 {
     if (child.isEmpty())
         return normalizeRemote(directory);
-    if (remoteIsAbsolute(child) || child.startsWith(QLatin1Char('\\')))
+    if (remoteIsAbsolute(child))
         return normalizeRemote(child);
     QString base = normalizeRemote(directory);
     if (base == QLatin1String("/"))
@@ -121,7 +117,7 @@ bool remoteIsAbsolute(const QString &pathValue)
 QString resolveRemoteInitial(const QString &home, const QString &initial)
 {
     const QString normalizedHome = normalizeRemote(home);
-    QString value = initial.trimmed();
+    QString value = initial;
     if (value.isEmpty() || value == QLatin1String("~") || value == QLatin1String("."))
         return normalizedHome;
     if (value.startsWith(QStringLiteral("~/")))
@@ -262,13 +258,38 @@ QString formatCount(qint64 count)
 QString safeRemoteFileName(const QString &name)
 {
     QString result = name;
-    result.replace(QLatin1Char('/'), QLatin1Char('_'));
-    result.replace(QLatin1Char('\\'), QLatin1Char('_'));
-    result.replace(QLatin1Char(':'), QLatin1Char('_'));
-    result = result.trimmed();
-    if (result == QLatin1String(".") || result == QLatin1String(".."))
+    const QString invalid = QStringLiteral("<>:\"/\\|?*");
+    for (QChar &ch : result) {
+        if (ch.unicode() < 32 || invalid.contains(ch))
+            ch = QLatin1Char('_');
+    }
+    for (qsizetype i = result.size(); i > 0 &&
+         (result.at(i - 1) == QLatin1Char('.') || result.at(i - 1) == QLatin1Char(' ')); --i)
+        result[i - 1] = QLatin1Char('_');
+    static const QRegularExpression reserved(
+        QStringLiteral("^(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\\.|$)"),
+        QRegularExpression::CaseInsensitiveOption);
+    if (reserved.match(result).hasMatch())
+        result.prepend(QLatin1Char('_'));
+    if (result.isEmpty())
         result = QStringLiteral("_");
     return result;
+}
+
+bool isSafeLocalTarget(const QString &root, const QString &target)
+{
+    const QString relative = QDir(root).relativeFilePath(target);
+    if (QDir::isAbsolutePath(relative) || relative == QLatin1String("..") ||
+        relative.startsWith(QStringLiteral("../")))
+        return false;
+    QString current = QDir(root).absolutePath();
+    for (const QString &part : relative.split(QLatin1Char('/'), Qt::SkipEmptyParts)) {
+        current = QDir(current).filePath(part);
+        const QFileInfo info(current);
+        if (info.isSymLink() || info.isJunction())
+            return false;
+    }
+    return true;
 }
 
 bool wildcardMatch(const QString &pattern, const QString &text)

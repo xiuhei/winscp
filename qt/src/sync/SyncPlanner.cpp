@@ -26,7 +26,7 @@ bool scanLocal(const QString &root, const QString &relative, bool recursive, int
     }
     const QString path = relative.isEmpty() ? root : QDir(root).filePath(relative);
     QDir directory(path);
-    if (!directory.exists()) {
+    if (!directory.exists() || !directory.isReadable()) {
         if (error)
             *error = QStringLiteral("本地目录不存在：%1").arg(path);
         return false;
@@ -62,9 +62,17 @@ bool scanRemote(Backend *backend, const QString &root, const QString &relative, 
     FileList list;
     if (!backend->list(directory, &list, error))
         return false;
+    QSet<QString> localNames;
     for (const FileInfo &info : list) {
         if (info.name == QLatin1String(".") || info.name == QLatin1String(".."))
             continue;
+        if (info.name != path::safeRemoteFileName(info.name) ||
+            localNames.contains(info.name.toCaseFolded())) {
+            if (error)
+                *error = QStringLiteral("远程文件名无法无损映射到本地目录：%1").arg(info.path);
+            return false;
+        }
+        localNames.insert(info.name.toCaseFolded());
         const QString childRelative =
             relative.isEmpty() ? info.name : relative + QLatin1Char('/') + info.name;
         entries->insert(childRelative, info);
@@ -134,8 +142,29 @@ SyncPlan buildSyncPlan(const SessionData &session, const QString &localRoot,
 
     QStringList sortedPaths = allPaths.values();
     std::sort(sortedPaths.begin(), sortedPaths.end());
-
+    QHash<QString, QString> localPaths;
     for (const QString &relative : sortedPaths) {
+        const QString key = relative.toCaseFolded();
+        if (localPaths.contains(key) && localPaths.value(key) != relative) {
+            result.error = QStringLiteral("文件名仅大小写不同，无法安全同步到本地：%1、%2")
+                               .arg(localPaths.value(key), relative);
+            return result;
+        }
+        localPaths.insert(key, relative);
+    }
+
+    QSet<QString> coveredDirectories;
+    for (const QString &relative : sortedPaths) {
+        bool covered = false;
+        for (QString ancestor = parentRelative(relative); !ancestor.isEmpty();
+             ancestor = parentRelative(ancestor)) {
+            if (coveredDirectories.contains(ancestor)) {
+                covered = true;
+                break;
+            }
+        }
+        if (covered)
+            continue;
         const auto localIt = localEntries.constFind(relative);
         const auto remoteIt = remoteEntries.constFind(relative);
         const bool hasLocal = localIt != localEntries.constEnd();
@@ -143,18 +172,21 @@ SyncPlan buildSyncPlan(const SessionData &session, const QString &localRoot,
         const FileInfo localInfo = hasLocal ? localIt.value() : FileInfo();
         const FileInfo remoteInfo = hasRemote ? remoteIt.value() : FileInfo();
 
-        if (hasLocal && localInfo.isSymlink)
+        if ((hasLocal && localInfo.isSymlink) || (hasRemote && remoteInfo.isSymlink)) {
+            coveredDirectories.insert(relative);
             continue;
-        if (hasRemote && remoteInfo.isSymlink)
-            continue;
-        if (hasLocal && hasRemote && localInfo.isDir != remoteInfo.isDir)
-            continue;
+        }
+        if (hasLocal && hasRemote && localInfo.isDir != remoteInfo.isDir) {
+            result.items.clear();
+            result.error = QStringLiteral("文件与目录类型冲突，请先处理：%1").arg(relative);
+            return result;
+        }
         if ((hasLocal && localInfo.isDir) && (hasRemote && remoteInfo.isDir))
             continue;
-        if (hasLocal && localInfo.isDir && !hasRemote)
+        if ((localInfo.isDir || remoteInfo.isDir) && !options.recursive)
             continue;
-        if (hasRemote && remoteInfo.isDir && !hasLocal)
-            continue;
+        if (localInfo.isDir || remoteInfo.isDir)
+            coveredDirectories.insert(relative);
 
         const QString parent = parentRelative(relative);
         const auto makeUpload = [&](const QString &reason) {
@@ -228,9 +260,9 @@ SyncPlan buildSyncPlan(const SessionData &session, const QString &localRoot,
             if (sizeDiff || (options.compareTime && remoteNewer))
                 makeDownload(sizeDiff ? QStringLiteral("大小不同")
                                       : QStringLiteral("远程文件较新"));
-        } else if (localNewer && !remoteNewer) {
+        } else if (options.compareTime && localNewer && !remoteNewer) {
             makeUpload(QStringLiteral("本地文件较新"));
-        } else if (remoteNewer && !localNewer) {
+        } else if (options.compareTime && remoteNewer && !localNewer) {
             makeDownload(QStringLiteral("远程文件较新"));
         } else if (sizeDiff) {
             makeUpload(QStringLiteral("大小不同（双向同步默认上传）"));

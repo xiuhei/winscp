@@ -91,7 +91,6 @@ private:
     void onDirectoryListed(const QString &path, const QList<FileInfo> &entries);
     void onOperationFinished(const QString &action, bool success, const QString &message);
     void onFileRead(const QString &path, const QByteArray &data);
-    void onFileWriteFinished(const QString &path, bool success, const QString &message);
     void onSymlinkCreated(const QString &linkPath, bool success, const QString &message);
 
     bool askHostKey(const QString &host, int port, const QString &algorithm,

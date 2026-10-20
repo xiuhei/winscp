@@ -95,6 +95,7 @@ bool KnownHosts::addOrUpdate(const QString &host, int port, const QString &algor
 {
     {
         QMutexLocker locker(&m_mutex);
+        const auto previous = m_entries;
         bool found = false;
         for (KnownHostKey &entry : m_entries) {
             if (entry.host.compare(host, Qt::CaseInsensitive) == 0 && entry.port == port) {
@@ -114,7 +115,10 @@ bool KnownHosts::addOrUpdate(const QString &host, int port, const QString &algor
             entry.added = QDateTime::currentDateTime();
             m_entries.append(entry);
         }
-        saveLocked();
+        if (!saveLocked(error)) {
+            m_entries = previous;
+            return false;
+        }
     }
     if (error)
         error->clear();
@@ -131,8 +135,12 @@ bool KnownHosts::remove(const QString &host, int port)
     for (int index = m_entries.size() - 1; index >= 0; --index) {
         const KnownHostKey &entry = m_entries.at(index);
         if (entry.host.compare(host, Qt::CaseInsensitive) == 0 && entry.port == port) {
+            const auto previous = m_entries;
             m_entries.removeAt(index);
-            saveLocked();
+            if (!saveLocked()) {
+                m_entries = previous;
+                return false;
+            }
             return true;
         }
     }
@@ -161,7 +169,7 @@ void KnownHosts::save() const
     saveLocked();
 }
 
-void KnownHosts::saveLocked() const
+bool KnownHosts::saveLocked(QString *error) const
 {
     AppPaths::ensureDirectories();
     QJsonArray array;
@@ -178,10 +186,13 @@ void KnownHosts::saveLocked() const
     root.insert(QStringLiteral("version"), 1);
     root.insert(QStringLiteral("hosts"), array);
     QSaveFile file(AppPaths::knownHostsFile());
-    if (!file.open(QIODevice::WriteOnly))
-        return;
-    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
-    file.commit();
+    const QByteArray data = QJsonDocument(root).toJson(QJsonDocument::Indented);
+    if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.commit()) {
+        if (error)
+            *error = QStringLiteral("无法保存 SSH 主机密钥：%1").arg(file.errorString());
+        return false;
+    }
+    return true;
 }
 
 } // namespace wsc

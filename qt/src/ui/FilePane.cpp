@@ -976,7 +976,7 @@ void FilePane::navigateRemote(const QString &pathValue)
         emit connectRequested();
         return;
     }
-    QString target = pathValue.trimmed();
+    QString target = pathValue;
     if (target.isEmpty())
         target = m_remoteHome;
     else if (!target.startsWith(QLatin1Char('/')))

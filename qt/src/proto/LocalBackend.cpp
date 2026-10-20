@@ -199,10 +199,17 @@ bool LocalBackend::removeDir(const QString &path, QString *error)
 
 bool LocalBackend::rename(const QString &from, const QString &to, QString *error)
 {
+    const QString source = canonical(from);
     const QString target = canonical(to);
-    if (QFileInfo::exists(target))
-        QFile::remove(target);
-    if (QFile::rename(canonical(from), target)) {
+    const QFileInfo sourceInfo(source);
+    const QFileInfo targetInfo(target);
+    if ((targetInfo.exists() || targetInfo.isSymLink()) && sourceInfo != targetInfo) {
+        if (error)
+            *error = QStringLiteral("目标已存在：%1").arg(QDir::toNativeSeparators(target));
+        return false;
+    }
+    if ((source == target && (sourceInfo.exists() || sourceInfo.isSymLink())) ||
+        QFile::rename(source, target)) {
         if (error)
             error->clear();
         return true;

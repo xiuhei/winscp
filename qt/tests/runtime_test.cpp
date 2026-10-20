@@ -2,6 +2,7 @@
 #include "core/Backend.h"
 #include "core/FileSystemController.h"
 #include "core/Settings.h"
+#include "sync/SyncPlanner.h"
 #include "terminal/SshShellSession.h"
 #include "ui/FilePane.h"
 #include "ui/FileTableModel.h"
@@ -53,10 +54,12 @@ public:
                     const QByteArray path = request.value(1);
                     emit requested(method, path);
                     if (method == "PROPFIND") {
-                        const QByteArray body = "<d:multistatus xmlns:d=\"DAV:\"><d:response><d:href>" + path +
+                        QByteArray body = "<d:multistatus xmlns:d=\"DAV:\"><d:response><d:href>" + path +
                             "</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype>"
                             "</d:prop></d:propstat></d:response></d:multistatus>";
                         const int delay = header.contains("Depth: 1") ? listDelay : connectDelay;
+                        if (header.contains("Depth: 1") && listings.contains(path))
+                            body = listings.value(path);
                         QTimer::singleShot(delay, socket, [socket, body] {
                             socket->write("HTTP/1.1 207 Multi-Status\r\nContent-Length: " + QByteArray::number(body.size()) +
                                           "\r\nConnection: close\r\n\r\n" + body);
@@ -106,6 +109,7 @@ public:
 
     int listDelay = 0;
     int connectDelay = 0;
+    QHash<QByteArray, QByteArray> listings;
 signals:
     void requested(const QByteArray &method, const QByteArray &path);
 };
@@ -118,6 +122,155 @@ private slots:
         QVERIFY(m_home.isValid());
         qputenv("WINSCPQT_HOME", m_home.path().toUtf8());
         Settings::instance().load();
+    }
+
+    void webDavRejectsInvalidListings_data()
+    {
+        QTest::addColumn<QByteArray>("response");
+        QTest::newRow("truncated XML") << QByteArray("<d:multistatus xmlns:d=\"DAV:\"><d:response>");
+        QTest::newRow("HTML error") << QByteArray("<html><body>error</body></html>");
+        QTest::newRow("missing collection") << wrapDav(davEntry("/file.txt", false));
+        QTest::newRow("empty multistatus") << wrapDav({});
+        QTest::newRow("failed resource type") << wrapDav(davEntry("/", true) +
+            "<d:response><d:href>/file.txt</d:href><d:propstat><d:prop>"
+            "<d:getcontentlength>42</d:getcontentlength></d:prop><d:status>HTTP/1.1 200 OK</d:status>"
+            "</d:propstat><d:propstat><d:prop><d:resourcetype/></d:prop>"
+            "<d:status>HTTP/1.1 403 Forbidden</d:status></d:propstat></d:response>");
+        QTest::newRow("failed resource") << wrapDav(davEntry("/", true) +
+            "<d:response><d:href>/denied</d:href><d:status>HTTP/1.1 403 Forbidden</d:status></d:response>");
+        QTest::newRow("outside collection") << wrapDav(davEntry("/", true) + davEntry("/outside/file.txt", false));
+        QTest::newRow("duplicate resource") << wrapDav(davEntry("/", true) +
+            davEntry("/same", false) + davEntry("/same", false));
+    }
+
+    void webDavRejectsInvalidListings()
+    {
+        QFETCH(QByteArray, response);
+        HttpFixture server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        server.listings.insert("/", response);
+        auto backend = createBackend(Protocol::WebDav);
+        QString error;
+        QVERIFY2(backend->connect(server.session(), &error), qPrintable(error));
+        FileList entries;
+        QVERIFY(!backend->list(QStringLiteral("/"), &entries, &error));
+        QVERIFY(!error.isEmpty());
+        QVERIFY(entries.isEmpty());
+    }
+
+    void webDavUsesHrefAndSuccessfulProperties()
+    {
+        HttpFixture server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        server.listings.insert("/", wrapDav(davEntry("/", true) +
+            "<d:response><d:href>/actual.txt</d:href>"
+            "<d:propstat><d:prop><d:displayname>Friendly title</d:displayname>"
+            "<d:getcontentlength>42</d:getcontentlength><d:resourcetype/></d:prop>"
+            "<d:status>HTTP/1.1 200 OK</d:status></d:propstat>"
+            "<d:propstat><d:prop><d:getcontentlength>0</d:getcontentlength></d:prop>"
+            "<d:status>HTTP/1.1 404 Not Found</d:status></d:propstat></d:response>"));
+        auto backend = createBackend(Protocol::WebDav);
+        QString error;
+        QVERIFY2(backend->connect(server.session(), &error), qPrintable(error));
+        FileList entries;
+        QVERIFY2(backend->list(QStringLiteral("/"), &entries, &error), qPrintable(error));
+        QCOMPARE(entries.size(), 1);
+        QCOMPARE(entries.first().name, QStringLiteral("actual.txt"));
+        QCOMPARE(entries.first().size, 42);
+        QVERIFY(!entries.first().isDir);
+    }
+
+    void syncIncludesMissingDirectoriesWithoutDuplicateChildren()
+    {
+        QTemporaryDir local;
+        QVERIFY(local.isValid());
+        QVERIFY(QDir().mkpath(local.filePath(QStringLiteral("empty"))));
+        QVERIFY(QDir().mkpath(local.filePath(QStringLiteral("bundle/nested"))));
+        QFile source(local.filePath(QStringLiteral("bundle/nested/file.txt")));
+        QVERIFY(source.open(QIODevice::WriteOnly));
+        source.write("payload");
+        source.close();
+        HttpFixture server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        server.listings.insert("/", wrapDav(davEntry("/", true) + davEntry("/remote-empty", true)));
+        SyncOptions options;
+        options.direction = SyncDirection::Both;
+        auto plan = buildSyncPlan(server.session(), local.path(), QStringLiteral("/"), options, {});
+        QVERIFY2(plan.error.isEmpty(), qPrintable(plan.error));
+        QCOMPARE(plan.items.size(), 3);
+        QSet<QString> names;
+        for (const auto &item : plan.items) {
+            QVERIFY(item.file.isDir);
+            names.insert(item.relativePath);
+        }
+        QCOMPARE(names, (QSet<QString>{QStringLiteral("bundle"), QStringLiteral("empty"), QStringLiteral("remote-empty")}));
+        options.direction = SyncDirection::LocalToRemote;
+        options.deleteExtras = true;
+        plan = buildSyncPlan(server.session(), local.path(), QStringLiteral("/"), options, {});
+        QVERIFY2(plan.error.isEmpty(), qPrintable(plan.error));
+        QCOMPARE(plan.items.size(), 3);
+        int deletes = 0;
+        for (const auto &item : plan.items)
+            deletes += item.action == SyncAction::DeleteRemote;
+        QCOMPARE(deletes, 1);
+        options.recursive = false;
+        plan = buildSyncPlan(server.session(), local.path(), QStringLiteral("/"), options, {});
+        QVERIFY2(plan.error.isEmpty(), qPrintable(plan.error));
+        QVERIFY(plan.items.isEmpty());
+    }
+
+    void syncRejectsTypeConflictsAndIncompleteListings()
+    {
+        QTemporaryDir local;
+        QVERIFY(local.isValid());
+        QFile file(local.filePath(QStringLiteral("conflict")));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.close();
+        HttpFixture server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        server.listings.insert("/", wrapDav(davEntry("/", true) + davEntry("/conflict", true)));
+        SyncOptions options;
+        options.deleteExtras = true;
+        auto plan = buildSyncPlan(server.session(), local.path(), QStringLiteral("/"), options, {});
+        QVERIFY(!plan.error.isEmpty());
+        QVERIFY(plan.items.isEmpty());
+        server.listings.insert("/", wrapDav(davEntry("/", true) + davEntry("/CONFLICT", false)));
+        plan = buildSyncPlan(server.session(), local.path(), QStringLiteral("/"), options, {});
+        QVERIFY(!plan.error.isEmpty());
+        QVERIFY(plan.items.isEmpty());
+        server.listings.insert("/", "<broken");
+        plan = buildSyncPlan(server.session(), local.path(), QStringLiteral("/"), options, {});
+        QVERIFY(!plan.error.isEmpty());
+        QVERIFY(plan.items.isEmpty());
+        server.listings.insert("/", wrapDav(davEntry("/", true) +
+            davEntry("/NUL.txt", false)));
+        plan = buildSyncPlan(server.session(), local.path(), QStringLiteral("/"), options, {});
+        QVERIFY(!plan.error.isEmpty());
+        QVERIFY(plan.items.isEmpty());
+    }
+
+    void bidirectionalSyncHonorsDisabledTimeComparison()
+    {
+        QTemporaryDir local;
+        QVERIFY(local.isValid());
+        QFile file(local.filePath(QStringLiteral("same.txt")));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("data");
+        file.close();
+        HttpFixture server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        server.listings.insert("/", wrapDav(davEntry("/", true) + davEntry("/same.txt", false, 4)));
+        SyncOptions options;
+        options.direction = SyncDirection::Both;
+        options.compareTime = false;
+        auto plan = buildSyncPlan(server.session(), local.path(), QStringLiteral("/"), options, {});
+        QVERIFY2(plan.error.isEmpty(), qPrintable(plan.error));
+        QVERIFY(plan.items.isEmpty());
+        options.compareTime = true;
+        plan = buildSyncPlan(server.session(), local.path(), QStringLiteral("/"), options, {});
+        QVERIFY2(plan.error.isEmpty(), qPrintable(plan.error));
+        QCOMPARE(plan.items.size(), 1);
+        QCOMPARE(plan.items.first().action, SyncAction::Upload);
     }
 
     void disconnectDuringWebDavListing()
@@ -135,6 +288,23 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(disconnected.size(), 1, 5000);
         QVERIFY(!files.isConnected());
         QCOMPARE(listed.size(), 0);
+    }
+
+    void remoteNavigationPreservesLiteralNames()
+    {
+        HttpFixture server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        FileSystemController files;
+        FilePane pane(FilePane::Role::Remote);
+        pane.attachController(&files);
+        QSignalSpy listed(&files, &FileSystemController::directoryListed);
+        files.connectToHost(server.session());
+        QTRY_COMPARE_WITH_TIMEOUT(listed.size(), 1, 5000);
+        pane.showRemoteConnected(QStringLiteral("/"), QStringLiteral("/"));
+        pane.navigateRemote(QStringLiteral("/ spaced "));
+        QTRY_COMPARE_WITH_TIMEOUT(files.currentPath(), QStringLiteral("/ spaced "), 5000);
+        pane.navigateRemote(QStringLiteral("/a\\b"));
+        QTRY_COMPARE_WITH_TIMEOUT(files.currentPath(), QStringLiteral("/a\\b"), 5000);
     }
 
     void replacePendingConnection()
@@ -255,6 +425,20 @@ private slots:
     }
 
 private:
+    static QByteArray wrapDav(const QByteArray &responses)
+    {
+        return "<d:multistatus xmlns:d=\"DAV:\">" + responses + "</d:multistatus>";
+    }
+
+    static QByteArray davEntry(const QByteArray &href, bool directory, qint64 size = 0)
+    {
+        return "<d:response><d:href>" + href + "</d:href><d:propstat><d:prop><d:resourcetype>" +
+            (directory ? QByteArray("<d:collection/>") : QByteArray()) +
+            "</d:resourcetype><d:getcontentlength>" + QByteArray::number(size) +
+            "</d:getcontentlength><d:getlastmodified>Wed, 01 Jan 2020 00:00:00 GMT</d:getlastmodified>"
+            "</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>";
+    }
+
     QTemporaryDir m_home;
 };
 

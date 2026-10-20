@@ -9,6 +9,7 @@ class QPlainTextEdit;
 class QLineEdit;
 class QLabel;
 class QWidget;
+class QPushButton;
 
 namespace wsc {
 
@@ -18,6 +19,10 @@ public:
     TextEditorDialog(const QString &remotePath, const QByteArray &data, QWidget *parent = nullptr, bool readOnly = false);
 
     QByteArray content() const;
+    void finishSave(bool success, const QString &message = {});
+
+signals:
+    void saveRequested(const QByteArray &data);
 
 public slots:
     void reject() override;
@@ -37,6 +42,9 @@ private:
     QWidget *m_findBar = nullptr;
     QLabel *m_statusLabel = nullptr;
     QLabel *m_modifiedLabel = nullptr;
+    QPushButton *m_saveButton = nullptr;
+    QPushButton *m_cancelButton = nullptr;
+    bool m_saving = false;
     bool m_hasBom = false;
     bool m_crlf = false;
 };

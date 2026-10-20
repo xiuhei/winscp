@@ -7,12 +7,15 @@
 #include "ui/SessionEditor.h"
 #include "ui/Theme.h"
 #include "ui/TextEditorDialog.h"
+#include "ui/MainWindow.h"
 
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QJsonObject>
 #include <QLineEdit>
+#include <QFile>
+#include <QMessageBox>
 #include <QListWidget>
 #include <QPushButton>
 #include <QPlainTextEdit>
@@ -200,6 +203,73 @@ private slots:
         QVERIFY(edited.startsWith(QByteArray::fromHex("efbbbf")));
         QVERIFY(edited.contains("second\r\n"));
         QVERIFY(!edited.contains("\r\r\n"));
+    }
+
+    void editorRetainsChangesAfterFailedUpload()
+    {
+        TextEditorDialog dialog(QStringLiteral("/log"), "original\n");
+        auto *editor = dialog.findChild<QPlainTextEdit *>();
+        editor->appendPlainText(QStringLiteral("unsaved"));
+        const QByteArray edited = dialog.content();
+        QSignalSpy requested(&dialog, &TextEditorDialog::saveRequested);
+        QSignalSpy accepted(&dialog, &QDialog::accepted);
+        auto *buttons = dialog.findChild<QDialogButtonBox *>();
+        QPushButton *save = nullptr;
+        for (auto *button : buttons->buttons())
+            if (buttons->buttonRole(button) == QDialogButtonBox::AcceptRole)
+                save = qobject_cast<QPushButton *>(button);
+        QVERIFY(save);
+        save->click();
+        QCOMPARE(requested.size(), 1);
+        QVERIFY(editor->isReadOnly());
+        QCOMPARE(accepted.size(), 0);
+        dialog.reject();
+        QCOMPARE(dialog.content(), edited);
+        dialog.finishSave(false, QStringLiteral("权限不足"));
+        QVERIFY(!editor->isReadOnly());
+        QVERIFY(save->isEnabled());
+        QCOMPARE(dialog.content(), edited);
+        QVERIFY(editor->document()->isModified());
+        save->click();
+        QCOMPARE(requested.size(), 2);
+        dialog.finishSave(true);
+        QCOMPARE(accepted.size(), 1);
+    }
+
+    void localCopyRejectsSelfAndDescendants()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString source = directory.filePath(QStringLiteral("source.txt"));
+        QFile file(source);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("original");
+        file.close();
+        MainWindow window;
+        FilePane *local = nullptr;
+        for (auto *pane : window.findChildren<FilePane *>())
+            if (!pane->isRemote())
+                local = pane;
+        QVERIFY(local);
+        int warnings = 0;
+        QTimer dismiss;
+        connect(&dismiss, &QTimer::timeout, &window, [&] {
+            for (auto *message : window.findChildren<QMessageBox *>()) {
+                ++warnings;
+                message->accept();
+            }
+        });
+        dismiss.start(10);
+        local->externalFilesDropped({QUrl::fromLocalFile(source)}, directory.path(), false);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), QByteArray("original"));
+        file.close();
+        const QString tree = directory.filePath(QStringLiteral("tree"));
+        const QString nested = QDir(tree).filePath(QStringLiteral("sub"));
+        QVERIFY(QDir().mkpath(nested));
+        local->externalFilesDropped({QUrl::fromLocalFile(tree)}, nested, false);
+        QVERIFY(!QFileInfo::exists(QDir(nested).filePath(QStringLiteral("tree"))));
+        QCOMPARE(warnings, 2);
     }
 
     void iconsFollowTheme()

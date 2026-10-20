@@ -15,6 +15,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QMetaObject>
+#include <QSet>
 #include <QThread>
 #include <QTimer>
 #include <mutex>
@@ -46,17 +47,9 @@ struct TransferManager::Task {
 
 namespace {
 
-QString safeName(const QString &name)
-{
-    QString result = path::safeRemoteFileName(name);
-    if (result == QLatin1String(".") || result == QLatin1String("..") || result.isEmpty())
-        result = QStringLiteral("_");
-    return result;
-}
-
 QString localTarget(const QString &directory, const QString &name)
 {
-    return QDir::cleanPath(QDir(directory).filePath(safeName(name)));
+    return QDir::cleanPath(QDir(directory).filePath(path::safeRemoteFileName(name)));
 }
 
 QDateTime localModificationTime(const QFileInfo &info)
@@ -280,6 +273,22 @@ void TransferManager::runTask(TaskPtr task)
                  error.isEmpty() ? QStringLiteral("无法创建传输计划。") : error);
         return;
     }
+    QSet<QString> targets;
+    for (const PlanItem &item : planner.items) {
+        if (item.isSymlink)
+            continue;
+        const QString key = task->direction == TransferDirection::Download
+            ? item.target.toCaseFolded() : item.target;
+        if (targets.contains(key) ||
+            (task->direction == TransferDirection::Download &&
+             !path::isSafeLocalTarget(task->targetRoot, item.target))) {
+            backend->disconnect();
+            complete(TransferStatus::Failed,
+                     QStringLiteral("目标路径重名或包含符号链接，已中止传输：%1").arg(item.target));
+            return;
+        }
+        targets.insert(key);
+    }
     task->entries.clear();
 
     {
@@ -319,7 +328,13 @@ bool TransferManager::planUpload(const QList<FileInfo> &entries, const QString &
                 *error = QStringLiteral("传输已取消。");
             return false;
         }
-        const QString target = path::remoteJoin(remoteDirectory, safeName(entry.name));
+        if (entry.name.isEmpty() || entry.name == QLatin1String(".") ||
+            entry.name == QLatin1String("..") || entry.name.contains(QLatin1Char('/'))) {
+            if (error)
+                *error = QStringLiteral("源文件名无效：%1").arg(entry.name);
+            return false;
+        }
+        const QString target = path::remoteJoin(remoteDirectory, entry.name);
         if (entry.isSymlink) {
             PlanItem item;
             item.isSymlink = true;
@@ -370,7 +385,7 @@ bool TransferManager::planUploadDirectory(const QString &localDirectory,
         return false;
     }
     QDir directory(localDirectory);
-    if (!directory.exists()) {
+    if (!directory.exists() || !directory.isReadable()) {
         if (error)
             *error = QStringLiteral("目录不存在：%1").arg(localDirectory);
         return false;
@@ -385,7 +400,7 @@ bool TransferManager::planUploadDirectory(const QString &localDirectory,
             return false;
         }
         const QString target =
-            path::remoteJoin(remoteDirectory, safeName(info.fileName()));
+            path::remoteJoin(remoteDirectory, info.fileName());
         if (info.isSymLink()) {
             PlanItem item;
             item.isSymlink = true;
@@ -548,6 +563,12 @@ bool TransferManager::executePlan(TaskPtr task, Planner *planner, Backend *backe
                 *error = QStringLiteral("传输已取消。");
             return false;
         }
+        if (task->direction == TransferDirection::Download &&
+            !path::isSafeLocalTarget(task->targetRoot, item.target)) {
+            if (error)
+                *error = QStringLiteral("下载目标包含符号链接：%1").arg(item.target);
+            return false;
+        }
 
         if (item.isDir) {
             bool ok = false;
@@ -660,7 +681,7 @@ bool TransferManager::executePlan(TaskPtr task, Planner *planner, Backend *backe
                 QString ignored;
                 backend->setModifiedTime(item.target, item.modified, &ignored);
             }
-        } else if (item.modified.isValid()) {
+        } else if (task->preserveTimestamps && item.modified.isValid()) {
             QFile localFile(item.target);
             if (localFile.open(QIODevice::ReadWrite))
                 localFile.setFileTime(item.modified, QFileDevice::FileModificationTime);

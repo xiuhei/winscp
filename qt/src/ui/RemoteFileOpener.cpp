@@ -253,7 +253,7 @@ void RemoteFileOpener::openLocal(const QString &localPath, const QString &remote
             return;
         }
         const QByteArray data = file.readAll();
-        QStringDecoder decoder(QStringDecoder::Utf8);
+        QStringDecoder decoder(QStringDecoder::Utf8, QStringConverter::Flag::Stateless);
         const QString decoded = decoder.decode(data);
         if (decoder.hasError() || decoded.contains(QChar::Null)) {
             QMessageBox::information(m_parent, QStringLiteral("无法编辑"),

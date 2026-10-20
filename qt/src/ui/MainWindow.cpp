@@ -47,6 +47,7 @@
 #include <QSplitter>
 #include <QStandardPaths>
 #include <QStatusBar>
+#include <QStringDecoder>
 #include <QThread>
 #include <QTimer>
 #include <QToolBar>
@@ -88,11 +89,18 @@ FileInfo makeDemoEntry(const QString &directory, const QString &name, bool isDir
     return info;
 }
 
-bool copyLocalRecursively(const QString &source, const QString &target, QString *error)
+bool copyLocalRecursively(const QString &source, const QString &target, QString *error, int depth = 0)
 {
     const QFileInfo sourceInfo(source);
+    const QFileInfo targetInfo(target);
+    if (depth > 128 || sourceInfo.isSymLink() || sourceInfo.isJunction() ||
+        targetInfo.isSymLink() || targetInfo.isJunction() || sourceInfo == targetInfo) {
+        if (error)
+            *error = QStringLiteral("无法复制到自身、符号链接或过深的目录：%1").arg(target);
+        return false;
+    }
     if (sourceInfo.isDir()) {
-        if (!QDir().mkpath(target)) {
+        if (!QDir(source).isReadable() || !QDir().mkpath(target)) {
             if (error)
                 *error = QStringLiteral("无法创建目录：%1").arg(target);
             return false;
@@ -101,22 +109,13 @@ bool copyLocalRecursively(const QString &source, const QString &target, QString 
             QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System);
         for (const QFileInfo &child : children) {
             if (!copyLocalRecursively(child.absoluteFilePath(),
-                                      QDir(target).filePath(child.fileName()), error))
+                                      QDir(target).filePath(child.fileName()), error, depth + 1))
                 return false;
         }
         return true;
     }
-    if (QFileInfo::exists(target) && !QFile::remove(target)) {
-        if (error)
-            *error = QStringLiteral("无法覆盖目标文件：%1").arg(target);
-        return false;
-    }
-    if (!QFile::copy(source, target)) {
-        if (error)
-            *error = QStringLiteral("无法复制 %1 到 %2").arg(source, target);
-        return false;
-    }
-    return true;
+    LocalBackend backend;
+    return backend.uploadFile(source, target, {}, nullptr, error);
 }
 
 } // namespace
@@ -527,8 +526,6 @@ void MainWindow::connectSignals()
     connect(m_remoteFs, &FileSystemController::operationFinished, this,
             &MainWindow::onOperationFinished);
     connect(m_remoteFs, &FileSystemController::fileRead, this, &MainWindow::onFileRead);
-    connect(m_remoteFs, &FileSystemController::fileWriteFinished, this,
-            &MainWindow::onFileWriteFinished);
     connect(m_remoteFs, &FileSystemController::symlinkCreated, this,
             &MainWindow::onSymlinkCreated);
     connect(m_remoteFs, &FileSystemController::busyChanged, this, [this](bool) { updateActions(); });
@@ -785,24 +782,36 @@ void MainWindow::showTextEditor(const QString &path, const QByteArray &data, boo
                                  QStringLiteral("内置编辑器支持不超过 32 MB 的文本。"));
         return;
     }
-    if (data.contains('\0')) {
+    QStringDecoder decoder(QStringDecoder::Utf8, QStringConverter::Flag::Stateless);
+    const QString decoded = decoder.decode(data);
+    Q_UNUSED(decoded);
+    if (data.contains('\0') || decoder.hasError()) {
         QMessageBox::information(this, QStringLiteral("无法编辑"),
-                                 QStringLiteral("该文件看起来是二进制文件，无法使用内置编辑器打开。"));
+                                 QStringLiteral("内置编辑器仅支持 UTF-8 文本，无法编辑该文件。"));
         return;
     }
     TextEditorDialog dialog(path, data, this, readOnly);
-    if (dialog.exec() == QDialog::Accepted)
-        m_remoteFs->writeFile(path, dialog.content());
-}
-
-void MainWindow::onFileWriteFinished(const QString &path, bool success, const QString &message)
-{
-    if (success) {
-        showStatus(QStringLiteral("已保存 %1").arg(path));
-    } else {
-        showStatus(message, true);
-        QMessageBox::warning(this, QStringLiteral("保存失败"), message);
-    }
+    const quint64 connectionId = m_remoteFs->connectionId();
+    connect(&dialog, &TextEditorDialog::saveRequested, &dialog, [&, connectionId](const QByteArray &content) {
+        if (!m_remoteFs->isConnected() || m_remoteFs->connectionId() != connectionId) {
+            dialog.finishSave(false, QStringLiteral("连接已断开或会话已切换，请保留内容并重新打开文件。"));
+            return;
+        }
+        m_remoteFs->writeFile(path, content);
+    });
+    connect(m_remoteFs, &FileSystemController::fileWriteFinished, &dialog,
+            [&](const QString &savedPath, bool success, const QString &message) {
+        if (savedPath == path) {
+            dialog.finishSave(success, message);
+            showStatus(message, !success);
+        }
+    });
+    const auto interrupted = [&] {
+        dialog.finishSave(false, QStringLiteral("连接已断开或会话已切换，编辑内容已保留。"));
+    };
+    connect(m_remoteFs, &FileSystemController::connecting, &dialog, interrupted);
+    connect(m_remoteFs, &FileSystemController::disconnected, &dialog, interrupted);
+    dialog.exec();
 }
 
 void MainWindow::onSymlinkCreated(const QString &linkPath, bool success, const QString &message)
@@ -1026,7 +1035,8 @@ void MainWindow::renameEntry(const FileInfo &info, bool remote)
     const QString newName = name.trimmed();
     if (newName.isEmpty() || newName == info.name)
         return;
-    if (newName.contains(QLatin1Char('/')) || newName.contains(QLatin1Char('\\'))) {
+    if (newName == QLatin1String(".") || newName == QLatin1String("..") ||
+        newName.contains(QLatin1Char('/')) || newName.contains(QLatin1Char('\\'))) {
         QMessageBox::warning(this, QStringLiteral("名称无效"), QStringLiteral("名称不能包含路径分隔符。"));
         return;
     }
@@ -1039,19 +1049,10 @@ void MainWindow::renameEntry(const FileInfo &info, bool remote)
     }
     const QString parent = QFileInfo(info.path).absolutePath();
     const QString target = QDir(parent).filePath(newName);
-    if (QFileInfo::exists(target)) {
-        if (QMessageBox::question(this, QStringLiteral("目标已存在"),
-                                  QStringLiteral("“%1”已存在，是否覆盖？").arg(newName))
-            != QMessageBox::Yes)
-            return;
-        if (QFileInfo(target).isDir())
-            QDir(target).removeRecursively();
-        else
-            QFile::remove(target);
-    }
-    if (!QFile::rename(info.path, target)) {
-        QMessageBox::warning(this, QStringLiteral("重命名失败"),
-                             QStringLiteral("无法将 %1 重命名为 %2。").arg(info.name, newName));
+    LocalBackend backend;
+    QString error;
+    if (!backend.rename(info.path, target, &error)) {
+        QMessageBox::warning(this, QStringLiteral("重命名失败"), error);
     } else {
         m_localPane->refresh();
         showStatus(QStringLiteral("已重命名为 %1。").arg(newName));
@@ -1171,6 +1172,15 @@ void MainWindow::copyLocalPaths(const QStringList &paths, const QString &targetD
     QStringList errors;
     for (const QString &path : paths) {
         const QString target = QDir(targetDirectory).filePath(QFileInfo(path).fileName());
+        const QFileInfo source(path);
+        const QString destination = QDir(QFileInfo(targetDirectory).canonicalFilePath())
+                                        .filePath(source.fileName());
+        const QString relative = QDir(source.canonicalFilePath()).relativeFilePath(destination);
+        if (source.isDir() && !QDir::isAbsolutePath(relative) &&
+            relative != QLatin1String("..") && !relative.startsWith(QStringLiteral("../"))) {
+            errors.append(QStringLiteral("不能将目录复制到自身或其子目录：%1").arg(path));
+            continue;
+        }
         QString error;
         if (!copyLocalRecursively(path, target, &error))
             errors.append(error);

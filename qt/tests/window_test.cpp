@@ -421,8 +421,10 @@ private slots:
             auto *editor = m_window->findChild<TextEditorDialog *>();
             if (!editor || !editor->isVisible())
                 return;
-            editorSeen = true;
             auto *text = editor->findChild<QPlainTextEdit *>();
+            if (text->isReadOnly())
+                return;
+            editorSeen = true;
             displayed = text->toPlainText().toUtf8();
             text->appendPlainText(QStringLiteral("saved through link"));
             QMetaObject::invokeMethod(editor, "accept");

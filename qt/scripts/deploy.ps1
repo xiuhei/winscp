@@ -82,10 +82,6 @@ foreach ($dll in $runtimeDlls) {
     }
 }
 
-if (Test-Path $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
-Write-Host "Creating $zipPath..."
-Compress-Archive -Path (Join-Path $packageDir "*") -DestinationPath $zipPath
-
 $savedPath = $env:PATH
 $savedPlatform = $env:QT_QPA_PLATFORM
 $savedHome = $env:WINSCPQT_HOME
@@ -96,6 +92,7 @@ try {
     $env:QT_QPA_FONTDIR = Join-Path $env:SystemRoot "Fonts"
     $env:WINSCPQT_HOME = Join-Path $sourceRoot "build/deploy-smoke-home"
     $screenshot = Join-Path $sourceRoot "build/deploy-smoke.png"
+    if (Test-Path -LiteralPath $screenshot) { Remove-Item -LiteralPath $screenshot -Force }
     $process = Start-Process -FilePath (Join-Path $packageDir "WinSCPQt.exe") -WindowStyle Hidden `
         -ArgumentList @("--demo", "--screenshot", "`"$screenshot`"") -Wait -PassThru `
         -WorkingDirectory $packageDir
@@ -111,5 +108,11 @@ try {
 }
 
 Write-Host ""
+if (Test-Path $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+Write-Host "Creating $zipPath..."
+Compress-Archive -Path (Join-Path $packageDir "*") -DestinationPath $zipPath
+$hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+Set-Content -LiteralPath ($zipPath + ".sha256") -Encoding ascii -Value "$hash  $PackageName.zip"
+
 Write-Host "Package: $packageDir"
 Write-Host "Archive: $zipPath"

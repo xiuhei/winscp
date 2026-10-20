@@ -4,6 +4,7 @@
 #include "core/Backend.h"
 #include "core/PathUtils.h"
 #include "core/Settings.h"
+#include "core/Logger.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -11,6 +12,7 @@
 #include <QFileInfo>
 #include <QTextStream>
 #include <QTemporaryFile>
+#include <QTemporaryDir>
 #include <QScopeGuard>
 #include <QUuid>
 
@@ -52,6 +54,65 @@ static bool verifyCancelledOverwrite(Backend *backend, const QString &home, QStr
     return true;
 }
 
+static bool verifyTransferIntegrity(Backend *backend, const QString &home, QString *error)
+{
+    const QString directory = path::remoteJoin(home,
+        QStringLiteral(".winscp-integrity-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (!backend->mkdir(directory, error))
+        return false;
+    const auto cleanup = qScopeGuard([&] { backend->removeDir(directory, nullptr); });
+    QTemporaryDir local;
+    if (!local.isValid())
+        return false;
+    const QString remote = path::remoteJoin(directory, QStringLiteral("payload.bin"));
+    QByteArray payload(1536 * 1024 + 37, Qt::Uninitialized);
+    for (qsizetype i = 0; i < payload.size(); ++i)
+        payload[i] = static_cast<char>((i * 31 + i / 257) % 256);
+    if (!backend->writeFile(remote, payload, error))
+        return false;
+    QByteArray contents;
+    if (!backend->readFile(remote, &contents, error) || contents != payload) {
+        *error = QStringLiteral("大文件读取内容或尾部不完整。");
+        return false;
+    }
+    const QString destination = local.filePath(QStringLiteral("download.bin"));
+    if (!backend->downloadFile(remote, destination, payload.size(), {}, nullptr, error))
+        return false;
+    QFile downloaded(destination);
+    if (!downloaded.open(QIODevice::ReadOnly) || downloaded.readAll() != payload) {
+        *error = QStringLiteral("下载内容或尾部不完整。");
+        return false;
+    }
+    downloaded.close();
+    if (backend->downloadFile(remote, destination, payload.size() + 100, {}, nullptr, error) ||
+        !downloaded.open(QIODevice::ReadOnly) || downloaded.readAll() != payload) {
+        *error = QStringLiteral("不完整下载替换了原本地文件。");
+        return false;
+    }
+    downloaded.close();
+    CancelToken cancel{false};
+    const bool cancelledDownload = backend->downloadFile(remote, destination, payload.size(),
+        [&](const TransferProgress &) { cancel.store(true); }, &cancel, error);
+    if (cancelledDownload || !downloaded.open(QIODevice::ReadOnly) || downloaded.readAll() != payload) {
+        *error = QStringLiteral("取消下载未保留原本地文件。");
+        return false;
+    }
+    const QString named = path::remoteJoin(directory, QStringLiteral("report -> final "));
+    if (!backend->writeFile(named, "named contents", error))
+        return false;
+    FileList files;
+    if (!backend->list(directory, &files, error))
+        return false;
+    bool found = false;
+    for (const auto &file : files)
+        found |= file.path == named && file.name == QStringLiteral("report -> final ");
+    if (!found || !backend->readFile(named, &contents, error) || contents != QByteArray("named contents")) {
+        *error = QStringLiteral("文件名被列表解析或路径处理改变。");
+        return false;
+    }
+    return true;
+}
+
 int main(int argc, char *argv[])
 {
     QCoreApplication application(argc, argv);
@@ -79,6 +140,14 @@ int main(int argc, char *argv[])
     if (!backend->connect(session, &error)) {
         std::fprintf(stderr, "connect failed: %s\n", qPrintable(error));
         return 1;
+    }
+    if (session.protocol == Protocol::Ftp || session.protocol == Protocol::Ftps) {
+        QFile log(Logger::instance().logFilePath());
+        if (!session.password.isEmpty() && log.open(QIODevice::ReadOnly) &&
+            log.readAll().contains("FTP > PASS " + session.password.toUtf8())) {
+            std::fprintf(stderr, "FTP password was written to the log\n");
+            return 1;
+        }
     }
     const QString home = backend->homePath();
     std::printf("home: %s\n", qPrintable(home));
@@ -138,7 +207,13 @@ int main(int argc, char *argv[])
             std::printf("removed %s\n", qPrintable(remotePath));
         }
     }
-    if (session.protocol == Protocol::Sftp || session.protocol == Protocol::Scp) {
+    if (!verifyTransferIntegrity(backend.get(), home, &error)) {
+        std::fprintf(stderr, "integrity regression failed: %s\n", qPrintable(error));
+        return 1;
+    }
+    std::printf("large payload, download failure/cancel and exact filenames verified\n");
+    if (session.protocol == Protocol::Sftp || session.protocol == Protocol::Scp ||
+        session.protocol == Protocol::Ftp || session.protocol == Protocol::Ftps) {
         if (!verifyCancelledOverwrite(backend.get(), home, &error)) {
             std::fprintf(stderr, "cancel regression failed: %s\n", qPrintable(error));
             return 1;

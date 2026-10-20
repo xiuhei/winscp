@@ -12,7 +12,7 @@ from pyftpdlib.handlers import FTPHandler
 from pyftpdlib.servers import FTPServer
 import logging
 from pyftpdlib.log import config_logging
-config_logging(level=logging.DEBUG)
+config_logging(level=logging.INFO)
 
 
 def main() -> int:
@@ -29,9 +29,15 @@ def main() -> int:
     authorizer.add_user("test", "test", args.root, perm="elradfmwMT")
 
     if args.tls:
+        from pyftpdlib.handlers import ThrottledDTPHandler
         from pyftpdlib.handlers.ftps.control import TLS_FTPHandler
+        from pyftpdlib.handlers.ftps.data import TLS_DTPHandler
+
+        class ThrottledTlsData(ThrottledDTPHandler, TLS_DTPHandler):
+            write_limit = 512 * 1024
 
         handler = TLS_FTPHandler
+        handler.dtp_handler = ThrottledTlsData
         handler.certfile = args.tls[0]
         handler.keyfile = args.tls[1]
         handler.tls_control_required = True
