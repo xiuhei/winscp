@@ -44,9 +44,7 @@ public:
     void enqueueUpload(const SessionData &session, const QList<FileInfo> &localEntries,
                        const QString &remoteDirectory);
     int enqueueDownload(const SessionData &session, const QList<FileInfo> &remoteEntries,
-                        const QString &localDirectory, bool openWhenDone = false);
-
-    bool opensFile(int id) const;
+                        const QString &localDirectory);
     void cancelTask(int id);
     void cancelAll();
     void clearFinished();
@@ -57,7 +55,6 @@ signals:
     void taskAdded(int id);
     void taskStateChanged(int id);
     void allTransfersFinished();
-    void downloadReadyToOpen(const QString &localPath);
     void statusMessage(const QString &message);
     void queueChanged();
 

@@ -154,7 +154,10 @@ TransferQueueWidget::TransferQueueWidget(TransferManager *manager, QWidget *pare
         refreshSummary();
         updateEmptyState();
     });
-    connect(m_manager, &TransferManager::taskAdded, this, [this](int) {
+    connect(m_manager, &TransferManager::taskAdded, this, [this](int id) {
+        const QModelIndex index = m_model->index(m_model->rowForId(id), 0);
+        m_table->selectionModel()->setCurrentIndex(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+        m_table->scrollTo(index);
         refreshSummary();
         updateEmptyState();
     });

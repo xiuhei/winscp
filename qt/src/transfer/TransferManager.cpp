@@ -38,8 +38,6 @@ struct TransferManager::Task {
     QString currentFile;
     double speed = 0;
     int skipped = 0;
-    bool openWhenDone = false;
-    QString openPath;
 };
 
 namespace {
@@ -103,12 +101,6 @@ TransferManager::~TransferManager()
     shutdown();
 }
 
-bool TransferManager::opensFile(int id) const
-{
-    const auto task = m_byId.value(id);
-    return task && task->openWhenDone;
-}
-
 void TransferManager::setParallelLimit(int limit)
 {
     m_parallelLimit = qBound(1, limit, 8);
@@ -152,7 +144,7 @@ void TransferManager::enqueueUpload(const SessionData &session, const QList<File
 
 int TransferManager::enqueueDownload(const SessionData &session,
                                      const QList<FileInfo> &remoteEntries,
-                                     const QString &localDirectory, bool openWhenDone)
+                                     const QString &localDirectory)
 {
     if (remoteEntries.isEmpty())
         return -1;
@@ -165,9 +157,6 @@ int TransferManager::enqueueDownload(const SessionData &session,
     task->session = session;
     task->entries = remoteEntries;
     task->status = TransferStatus::Queued;
-    task->openWhenDone = openWhenDone;
-    if (openWhenDone && remoteEntries.size() == 1 && !remoteEntries.first().isDir)
-        task->openPath = QDir(localDirectory).filePath(safeName(remoteEntries.first().name));
     m_tasks.append(task);
     m_byId.insert(task->id, task);
 
@@ -657,8 +646,6 @@ void TransferManager::finishTask(TaskPtr task, TransferStatus status, const QStr
     emit queueChanged();
     if (status == TransferStatus::Completed) {
         Logger::instance().success(QStringLiteral("传输完成：%1").arg(task->name));
-        if (task->openWhenDone && !task->openPath.isEmpty())
-            emit downloadReadyToOpen(task->openPath);
     } else if (status == TransferStatus::Failed) {
         Logger::instance().error(QStringLiteral("传输失败：%1：%2").arg(task->name, message));
         emit statusMessage(QStringLiteral("传输失败：%1").arg(message));

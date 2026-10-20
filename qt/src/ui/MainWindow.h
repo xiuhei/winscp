@@ -70,8 +70,7 @@ private:
     void uploadSelection();
     void downloadSelection();
     void uploadEntries(const QList<FileInfo> &entries, const QString &targetDirectory);
-    void downloadEntries(const QList<FileInfo> &entries, const QString &targetDirectory,
-                         bool openWhenDone = false);
+    void downloadEntries(const QList<FileInfo> &entries, const QString &targetDirectory);
     void deleteEntries(const QList<FileInfo> &entries, bool remote);
     void renameEntry(const FileInfo &info, bool remote);
     void createFolder(const QString &parentPath, bool remote);

@@ -544,9 +544,8 @@ void MainWindow::connectSignals()
     connect(m_terminalPanel, &TerminalPanel::terminalCountChanged, this,
             [this](int) { updateActions(); });
 
-    connect(m_transferManager, &TransferManager::taskAdded, this, [this](int id) {
-        if (!m_transferManager->opensFile(id))
-            showTransferQueue(true);
+    connect(m_transferManager, &TransferManager::taskAdded, this, [this](int) {
+        showTransferQueue(true);
         updateTransferSummary();
         const int active = m_transferManager->model()->activeCount();
         showStatus(active > 0 ? QStringLiteral("已加入传输队列，共 %1 个活动任务。").arg(active)
@@ -554,8 +553,7 @@ void MainWindow::connectSignals()
     });
     connect(m_transferManager, &TransferManager::taskStateChanged, this, [this](int id) {
         const auto row = m_transferManager->model()->rowAt(m_transferManager->model()->rowForId(id));
-        if (!m_transferManager->opensFile(id) &&
-            (row.status == TransferStatus::Failed || row.status == TransferStatus::Cancelled))
+        if (row.status == TransferStatus::Failed || row.status == TransferStatus::Cancelled)
             m_transferBatchHasErrors = true;
     });
     connect(m_transferManager, &TransferManager::allTransfersFinished, this, [this] {
@@ -943,11 +941,9 @@ void MainWindow::uploadEntries(const QList<FileInfo> &entries, const QString &ta
     const QString target = targetDirectory.isEmpty() ? m_remotePane->currentPath()
                                                      : targetDirectory;
     m_transferManager->enqueueUpload(m_session, entries, target);
-    showTransferQueue(true);
 }
 
-void MainWindow::downloadEntries(const QList<FileInfo> &entries, const QString &targetDirectory,
-                                 bool openWhenDone)
+void MainWindow::downloadEntries(const QList<FileInfo> &entries, const QString &targetDirectory)
 {
     if (entries.isEmpty())
         return;
@@ -957,8 +953,7 @@ void MainWindow::downloadEntries(const QList<FileInfo> &entries, const QString &
     }
     QString target = targetDirectory.isEmpty() ? m_localPane->currentPath() : targetDirectory;
     QDir().mkpath(target);
-    m_transferManager->enqueueDownload(m_session, entries, target, openWhenDone);
-    showTransferQueue(true);
+    m_transferManager->enqueueDownload(m_session, entries, target);
 }
 
 void MainWindow::deleteEntries(const QList<FileInfo> &entries, bool remote)

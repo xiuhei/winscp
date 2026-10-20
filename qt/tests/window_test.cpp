@@ -308,24 +308,54 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(entry(m_remote, QStringLiteral("cache.bin")).isValid(), 10000);
         const FileInfo file = entry(m_remote, QStringLiteral("cache.bin"));
         QVERIFY(file.isValid());
+        int cancelledId = -1;
+        int selectedId = -1;
+        bool cancelClicked = false;
+        QObject cancellation;
+        const auto cancel = connect(transfers, &TransferManager::taskAdded, &cancellation, [&](int id) {
+            cancelledId = id;
+            QTimer::singleShot(0, &cancellation, [&] {
+                auto *table = queue->findChild<QTableView *>(QStringLiteral("TransferTable"));
+                const auto selected = table->selectionModel()->selectedRows();
+                if (!selected.isEmpty())
+                    selectedId = selected.first().data(TransferQueueModel::TaskIdRole).toInt();
+                for (auto *button : queue->findChildren<QToolButton *>())
+                    if (button->text() == QStringLiteral("取消")) {
+                        cancelClicked = true;
+                        button->click();
+                    }
+            });
+        });
         m_remote->openRequested(file, true);
-        auto *cancelled = m_window->findChild<QProgressDialog *>(QStringLiteral("RemoteOpenProgress"));
-        QVERIFY(cancelled);
-        cancelled->cancel();
-        // Cancellation followed by reopen must ignore the previous stat reply.
-        QMetaObject::invokeMethod(cancelled, "canceled");
+        QTRY_VERIFY_WITH_TIMEOUT(cancelledId >= 0 &&
+            !transfers->model()->rowAt(transfers->model()->rowForId(cancelledId)).canCancel, 10000);
+        disconnect(cancel);
+        QVERIFY(cancelClicked);
+        QCOMPARE(selectedId, cancelledId);
+        QCOMPARE(transfers->model()->rowAt(transfers->model()->rowForId(cancelledId)).status, TransferStatus::Cancelled);
+        QVERIFY(m_handler.opened.isEmpty());
+        QVERIFY(m_window->findChildren<QProgressDialog *>().isEmpty());
+        queue->close();
+        bool singleWindow = false;
+        QObject observation;
+        const auto shown = connect(transfers, &TransferManager::taskAdded, &observation, [&](int) {
+            singleWindow = queue->isVisible() && m_window->findChildren<QProgressDialog *>().isEmpty() &&
+                m_window->findChildren<QDialog *>(QStringLiteral("TransferQueueWindow")).size() == 1;
+        });
         m_remote->openRequested(file, true);
         // Repeated opens share the in-flight job.
         m_remote->openRequested(file, true);
         QTRY_COMPARE_WITH_TIMEOUT(m_handler.opened.size(), 1, 15000);
-        QCOMPARE(added.size(), 1);
+        disconnect(shown);
+        QVERIFY(singleWindow);
+        QCOMPARE(added.size(), 2);
         QVERIFY(!queue->isVisible());
         const QString cached = m_handler.opened.last().toLocalFile();
         QVERIFY(cached.startsWith(AppPaths::downloadCacheDir() + QLatin1Char('/')));
         QVERIFY(QFileInfo::exists(cached));
         m_remote->openRequested(file, true);
         QTRY_COMPARE_WITH_TIMEOUT(m_handler.opened.size(), 2, 10000);
-        QCOMPARE(added.size(), 1);
+        QCOMPARE(added.size(), 2);
 
         // Fresh stat must notice changes even while the browser listing is stale.
         QSignalSpy written(m_fs, &FileSystemController::fileWriteFinished);
@@ -333,7 +363,7 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(!written.isEmpty(), 10000);
         m_remote->openRequested(file, true);
         QTRY_COMPARE_WITH_TIMEOUT(m_handler.opened.size(), 3, 15000);
-        QCOMPARE(added.size(), 2);
+        QCOMPARE(added.size(), 3);
         QVERIFY(m_handler.opened.last().toLocalFile() != cached);
         QFile modified(m_handler.opened.last().toLocalFile());
         QVERIFY(modified.open(QIODevice::ReadOnly));
@@ -346,7 +376,7 @@ private slots:
         other.path = QStringLiteral("/home/test/cache.bin");
         m_remote->openRequested(other, true);
         QTRY_COMPARE_WITH_TIMEOUT(m_handler.opened.size(), 4, 15000);
-        QCOMPARE(added.size(), 3);
+        QCOMPARE(added.size(), 4);
         QVERIFY(m_handler.opened.last().toLocalFile() != cached);
         QVERIFY(m_handler.opened.last() != m_handler.opened.at(2));
 

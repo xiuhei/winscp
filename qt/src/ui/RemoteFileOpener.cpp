@@ -17,8 +17,6 @@
 #include <QJsonObject>
 #include <QMessageBox>
 #include <QMimeDatabase>
-#include <QPointer>
-#include <QProgressDialog>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QStringDecoder>
@@ -88,23 +86,16 @@ struct RemoteFileOpener::Request {
     QString directory;
     QString localPath;
     QJsonObject record;
-    QPointer<QProgressDialog> dialog;
     quint64 requestId = 0;
     int taskId = -1;
     bool verifying = false;
-    bool cancelled = false;
 };
 
 RemoteFileOpener::RemoteFileOpener(FileSystemController *files, TransferManager *transfers, QWidget *parent)
     : QObject(parent), m_files(files), m_transfers(transfers), m_parent(parent)
 {
     connect(files, &FileSystemController::fileStated, this, &RemoteFileOpener::stated);
-    connect(transfers->model(), &TransferQueueModel::rowsChanged, this, [this] {
-        const auto requests = m_requests.values();
-        for (const auto &request : requests)
-            if (request->taskId >= 0)
-                update(request->taskId);
-    });
+    connect(transfers, &TransferManager::taskStateChanged, this, &RemoteFileOpener::update);
     connect(files, &FileSystemController::connecting, this, [this] {
         const auto requests = m_requests.values();
         for (const auto &request : requests) {
@@ -129,42 +120,14 @@ RemoteFileOpener::RemoteFileOpener(FileSystemController *files, TransferManager 
 void RemoteFileOpener::open(const SessionData &session, const FileInfo &file)
 {
     const QString key = identity(session, file.path);
-    if (auto existing = m_requests.value(key)) {
-        if (existing->dialog) {
-            existing->dialog->show();
-            existing->dialog->raise();
-            existing->dialog->activateWindow();
-        }
+    if (m_requests.contains(key))
         return;
-    }
     cleanup();
     auto request = std::make_shared<Request>();
     request->requestId = m_nextRequestId++;
     request->key = key;
     request->file = file;
-    auto *dialog = new QProgressDialog(QStringLiteral("正在检查远程文件：%1").arg(file.name),
-                                        QStringLiteral("取消"), 0, 0, m_parent, Qt::Window);
-    dialog->setObjectName(QStringLiteral("RemoteOpenProgress"));
-    dialog->setWindowTitle(QStringLiteral("下载并打开 — %1").arg(file.name));
-    dialog->setWindowModality(Qt::NonModal);
-    dialog->setMinimumDuration(0);
-    dialog->setAutoClose(false);
-    dialog->setAutoReset(false);
-    dialog->setAttribute(Qt::WA_DeleteOnClose);
-    request->dialog = dialog;
     m_requests.insert(key, request);
-    connect(dialog, &QProgressDialog::canceled, this, [this, key] {
-        const auto request = m_requests.value(key);
-        if (!request)
-            return;
-        request->cancelled = true;
-        if (request->taskId >= 0 && !request->verifying)
-            m_transfers->cancelTask(request->taskId);
-        else
-            m_requests.remove(key);
-    });
-    connect(dialog, &QProgressDialog::canceled, dialog, &QObject::deleteLater);
-    dialog->show();
     m_files->statFile(file.path, request->requestId);
 }
 
@@ -172,7 +135,7 @@ void RemoteFileOpener::stated(quint64 requestId, const SessionData &session, con
                               const FileInfo &info, const QString &error)
 {
     const auto request = m_requests.value(identity(session, path));
-    if (!request || request->requestId != requestId || request->cancelled)
+    if (!request || request->requestId != requestId)
         return;
     if (!error.isEmpty() || !info.isValid() || info.isDir) {
         fail(request, error.isEmpty() ? QStringLiteral("远程文件不存在或不是普通文件。") : error);
@@ -194,8 +157,6 @@ void RemoteFileOpener::stated(quint64 requestId, const SessionData &session, con
         request->record.insert(QStringLiteral("localModified"), QString::number(local.lastModified().toMSecsSinceEpoch()));
         writeRecord(request->directory, request->record);
         m_requests.remove(request->key);
-        if (request->dialog)
-            request->dialog->close();
         openLocal(request->localPath, request->file.path, snapshot);
         return;
     }
@@ -232,8 +193,6 @@ void RemoteFileOpener::stated(quint64 requestId, const SessionData &session, con
     }
     if (cached) {
         m_requests.remove(request->key);
-        if (request->dialog)
-            request->dialog->close();
         openLocal(request->localPath, request->file.path);
         return;
     }
@@ -241,7 +200,8 @@ void RemoteFileOpener::stated(quint64 requestId, const SessionData &session, con
         fail(request, QStringLiteral("缓存文件正在使用，无法更新：%1").arg(request->localPath));
         return;
     }
-    request->taskId = m_transfers->enqueueDownload(session, {request->file}, QFileInfo(request->localPath).absolutePath(), true);
+    request->taskId = m_transfers->enqueueDownload(session, {request->file}, QFileInfo(request->localPath).absolutePath());
+    update(request->taskId);
 }
 
 void RemoteFileOpener::update(int id)
@@ -255,17 +215,12 @@ void RemoteFileOpener::update(int id)
     if (!request || request->verifying)
         return;
     const auto row = m_transfers->model()->rowAt(m_transfers->model()->rowForId(id));
-    if (request->cancelled) {
-        if (row.status == TransferStatus::Completed || row.status == TransferStatus::Cancelled || row.status == TransferStatus::Failed)
-            m_requests.remove(request->key);
-        return;
-    }
     if (row.status == TransferStatus::Failed || row.status == TransferStatus::Cancelled) {
         fail(request, row.message.isEmpty() ? QStringLiteral("传输已取消。") : row.message);
         return;
     }
     if (row.status == TransferStatus::Completed) {
-        if (request->cancelled || !QFileInfo(request->localPath).isFile() ||
+        if (!QFileInfo(request->localPath).isFile() ||
             QFileInfo(request->localPath).size() < request->file.size) {
             fail(request, QStringLiteral("下载文件不完整。"));
             return;
@@ -275,25 +230,11 @@ void RemoteFileOpener::update(int id)
         m_files->statFile(request->file.path, request->requestId);
         return;
     }
-    if (request->dialog) {
-        request->dialog->setLabelText(QStringLiteral("%1\n%2 / %3\n%4").arg(request->file.name,
-            path::formatSize(row.bytesDone), path::formatSize(row.bytesTotal), row.message));
-        request->dialog->setRange(0, row.bytesTotal > 0 ? 1000 : 0);
-        if (row.bytesTotal > 0)
-            request->dialog->setValue(static_cast<int>(row.progress() * 1000));
-    }
 }
 
 void RemoteFileOpener::fail(const std::shared_ptr<Request> &request, const QString &message)
 {
     m_requests.remove(request->key);
-    if (request->dialog) {
-        disconnect(request->dialog, nullptr, this, nullptr);
-        request->dialog->setRange(0, 1);
-        request->dialog->setValue(0);
-        request->dialog->setLabelText(message);
-        request->dialog->setCancelButtonText(QStringLiteral("关闭"));
-    }
     emit statusMessage(message);
 }
 
