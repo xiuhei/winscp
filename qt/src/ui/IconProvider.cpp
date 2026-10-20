@@ -4,6 +4,7 @@
 
 #include <QFileIconProvider>
 #include <QFileInfo>
+#include <QIconEngine>
 #include <QLinearGradient>
 #include <QPainter>
 #include <QPainterPath>
@@ -91,6 +92,27 @@ QColor withAlpha(const QColor &color, int alpha)
     return result;
 }
 
+class ThemeIconEngine : public QIconEngine {
+public:
+    ThemeIconEngine(const QString &name, const QColor &color) : m_name(name), m_color(color) {}
+    QIconEngine *clone() const override { return new ThemeIconEngine(m_name, m_color); }
+    QPixmap pixmap(const QSize &size, QIcon::Mode mode, QIcon::State) override
+    {
+        QColor color = m_color.isValid() ? m_color : Theme::iconColor();
+        if (mode == QIcon::Disabled)
+            color = Theme::isDark() ? QColor(QStringLiteral("#9aa7b5")) : QColor(QStringLiteral("#8c939b"));
+        return IconProvider::instance().pixmap(m_name, qMin(size.width(), size.height()), color);
+    }
+    void paint(QPainter *painter, const QRect &rect, QIcon::Mode mode, QIcon::State state) override
+    {
+        const auto image = pixmap(rect.size(), mode, state);
+        painter->drawPixmap(rect.center() - QPoint(image.width() / 2, image.height() / 2), image);
+    }
+private:
+    QString m_name;
+    QColor m_color;
+};
+
 } // namespace
 
 IconProvider &IconProvider::instance()
@@ -101,18 +123,12 @@ IconProvider &IconProvider::instance()
 
 QIcon IconProvider::icon(const QString &name, const QColor &color, int size)
 {
-    const QColor effective = color.isValid() ? color : Theme::iconColor();
-    const QString key = QStringLiteral("%1|%2|%3").arg(name, effective.name(), QString::number(size));
+    const QString key = QStringLiteral("%1|%2|%3").arg(name, color.isValid() ? color.name() : QStringLiteral("theme"), QString::number(size));
     const auto found = m_cache.constFind(key);
     if (found != m_cache.constEnd())
         return found.value();
 
-    QIcon result;
-    for (int pixelSize : {16, 20, 24, 32, 48, 64}) {
-        if (pixelSize > size && size > 0 && pixelSize != 16)
-            continue;
-        result.addPixmap(render(name, pixelSize, effective));
-    }
+    QIcon result(new ThemeIconEngine(name, color));
     m_cache.insert(key, result);
     return result;
 }
@@ -466,7 +482,7 @@ QPixmap IconProvider::render(const QString &name, int size, const QColor &color,
 QIcon IconProvider::fileIcon(const FileInfo &info, bool local, bool large)
 {
     static QFileIconProvider provider;
-    if (local) {
+    if (local && !Theme::isDark()) {
         QFileInfo fileInfo(info.path);
         if (fileInfo.exists() || fileInfo.isSymLink()) {
             QIcon systemIcon = provider.icon(fileInfo);

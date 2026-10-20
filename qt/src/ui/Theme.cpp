@@ -78,12 +78,12 @@ void Theme::apply(const QString &name)
             palette.setColor(QPalette::HighlightedText, QColor(QStringLiteral("#ffffff")));
             palette.setColor(QPalette::ToolTipBase, QColor(QStringLiteral("#2b3441")));
             palette.setColor(QPalette::ToolTipText, QColor(QStringLiteral("#e7edf6")));
-            palette.setColor(QPalette::PlaceholderText, QColor(QStringLiteral("#64748b")));
-            palette.setColor(QPalette::Disabled, QPalette::Text, QColor(QStringLiteral("#5f6b7c")));
+            palette.setColor(QPalette::PlaceholderText, QColor(QStringLiteral("#9da9b8")));
+            palette.setColor(QPalette::Disabled, QPalette::Text, QColor(QStringLiteral("#98a4b3")));
             palette.setColor(QPalette::Disabled, QPalette::ButtonText,
-                             QColor(QStringLiteral("#5f6b7c")));
+                             QColor(QStringLiteral("#98a4b3")));
             palette.setColor(QPalette::Disabled, QPalette::WindowText,
-                             QColor(QStringLiteral("#5f6b7c")));
+                             QColor(QStringLiteral("#98a4b3")));
         } else {
             palette.setColor(QPalette::Window, QColor(QStringLiteral("#f0f0f0")));
             palette.setColor(QPalette::WindowText, QColor(QStringLiteral("#000000")));
@@ -134,7 +134,7 @@ QColor Theme::text()
 
 QColor Theme::muted()
 {
-    return g_isDark ? QColor(QStringLiteral("#8492a6")) : QColor(QStringLiteral("#7b8a9d"));
+    return g_isDark ? QColor(QStringLiteral("#b8c2ce")) : QColor(QStringLiteral("#7b8a9d"));
 }
 
 QColor Theme::danger()
@@ -149,7 +149,7 @@ QColor Theme::success()
 
 QColor Theme::iconColor()
 {
-    return g_isDark ? QColor(QStringLiteral("#c9d4e3")) : QColor(QStringLiteral("#465a71"));
+    return g_isDark ? QColor(QStringLiteral("#edf1f5")) : QColor(QStringLiteral("#465a71"));
 }
 
 QColor Theme::paneBackground()

@@ -275,13 +275,13 @@ void FilePane::buildUi()
         m_autoRefreshTimer = new QTimer(this);
         m_autoRefreshTimer->setInterval(2000);
         m_autoRefreshTimer->setTimerType(Qt::PreciseTimer);
-        connect(m_autoRefreshTimer, &QTimer::timeout, this, &FilePane::refresh);
+        connect(m_autoRefreshTimer, &QTimer::timeout, this, [this] { refreshRemote(true); });
         connect(m_autoRefreshButton, &QToolButton::toggled, this, [this](bool enabled) {
             Settings::instance().autoRefresh = enabled;
             Settings::instance().save();
             updateAutoRefreshButton();
             if (enabled)
-                refresh();
+                refreshRemote(true);
         });
     }
     titleRow->addWidget(m_terminalButton);
@@ -337,6 +337,9 @@ void FilePane::buildUi()
     m_loadingBar->setRange(0, 0);
     m_loadingBar->setTextVisible(false);
     m_loadingBar->setFixedHeight(3);
+    auto loadingSizePolicy = m_loadingBar->sizePolicy();
+    loadingSizePolicy.setRetainSizeWhenHidden(true);
+    m_loadingBar->setSizePolicy(loadingSizePolicy);
     m_loadingBar->hide();
     headerLayout->addWidget(m_loadingBar);
 
@@ -822,6 +825,10 @@ void FilePane::showTablePage()
 void FilePane::setLoading(bool loading, const QString &path)
 {
     m_loading = loading;
+    if (loading && m_backgroundRefresh)
+        return;
+    if (!loading)
+        m_backgroundRefresh = false;
     m_loadingBar->setVisible(loading);
     if (loading) {
         if (!path.isEmpty())
@@ -844,20 +851,17 @@ void FilePane::applyRemoteListing(const QString &path, const QList<FileInfo> &en
     const QString normalized = path::normalizeRemote(path);
     const bool sameDirectory = m_remotePath == normalized && !m_remotePath.isEmpty();
     const int scroll = m_table->verticalScrollBar()->value();
-    const QString currentName = currentEntry().name;
-    const QStringList selectedNames = [&] {
-        QStringList names;
-        for (const FileInfo &entry : selectedEntries())
-            names.append(entry.name);
-        return names;
-    }();
     m_remotePath = normalized;
     m_lastRemoteRefresh = QDateTime::currentDateTime();
     m_refreshError.clear();
-    m_model->setEntries(withParent(entries, normalized, true));
+    if (sameDirectory) {
+        m_model->updateEntries(withParent(entries, normalized, true));
+    } else {
+        m_model->setEntries(withParent(entries, normalized, true));
+        m_table->clearSelection();
+        m_table->setCurrentIndex(QModelIndex());
+    }
     m_proxy->setShowHidden(m_showHidden);
-    m_table->clearSelection();
-    m_table->setCurrentIndex(QModelIndex());
     m_stack->setCurrentIndex(0);
     updateHeader();
     if (!sameDirectory)
@@ -873,12 +877,7 @@ void FilePane::applyRemoteListing(const QString &path, const QList<FileInfo> &en
     } else if (m_history.isEmpty()) {
         addHistory(normalized);
     }
-    if (!selectedNames.isEmpty())
-        selectByName(selectedNames);
     if (sameDirectory) {
-        for (int row = 0; row < m_proxy->rowCount(); ++row)
-            if (entryAtViewRow(row).name == currentName)
-                m_table->selectionModel()->setCurrentIndex(m_proxy->index(row, 0), QItemSelectionModel::NoUpdate);
         m_table->verticalScrollBar()->setValue(scroll);
     }
     else
@@ -966,6 +965,7 @@ void FilePane::navigateRemote(const QString &pathValue)
     target = path::normalizeRemote(target);
     m_pendingHistory = true;
     m_pendingRemotePath = target;
+    m_backgroundRefresh = false;
     setLoading(true, target);
     m_controller->listDirectory(target);
 }
@@ -1000,16 +1000,24 @@ void FilePane::goHome()
 void FilePane::refresh()
 {
     if (isRemote()) {
-        if (!m_remoteConnected || m_loading || !m_controller || m_controller->isBusy())
-            return;
-        m_pendingHistory = false;
-        m_pendingRemotePath = m_remotePath;
-        setLoading(true, m_remotePath);
-        m_controller->listDirectory(m_remotePath);
+        refreshRemote(false);
     } else {
         const QString path = m_localPath;
         navigateLocal(path);
     }
+}
+
+void FilePane::refreshRemote(bool background)
+{
+    if (!m_remoteConnected || m_loading || !m_controller || m_controller->isBusy() || m_remotePath.isEmpty())
+        return;
+    if (background && (QApplication::mouseButtons() != Qt::NoButton || QApplication::activePopupWidget()))
+        return;
+    m_pendingHistory = false;
+    m_pendingRemotePath = m_remotePath;
+    m_backgroundRefresh = background;
+    setLoading(true, m_remotePath);
+    m_controller->listDirectory(m_remotePath);
 }
 
 void FilePane::focusFileList()

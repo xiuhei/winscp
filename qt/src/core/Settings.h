@@ -29,6 +29,7 @@ public:
     int parallelTransfers = 2;
     int cacheRetentionDays = 7;
     bool autoRefresh = false;
+    bool showLoginDialog = true;
     bool preserveTimestamps = true;
     bool preservePermissions = true;
     bool showTransferQueue = true;

@@ -48,3 +48,8 @@ QWidget#TerminalView { background: #000000; }
 QStatusBar { background: #232830; border-top: 1px solid #424a55; }
 QStatusBar::item { border: none; }
 QDockWidget::title { background: #232830; padding: 2px 4px; }
+QListWidget#LoginSites { border: 1px solid #68717e; background: #1b212b; }
+QListWidget#LoginSites::item { padding: 5px; }
+QGroupBox { border: 1px solid #68717e; margin-top: 9px; }
+QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 3px; color: #edf1f5; }
+QPushButton { min-height: 24px; padding: 2px 12px; }

@@ -5,6 +5,7 @@
 #include "ui/Theme.h"
 
 #include <QCollator>
+#include <QHash>
 #include <QLocale>
 
 namespace wsc {
@@ -20,6 +21,35 @@ void FileTableModel::setEntries(const FileList &entries)
     beginResetModel();
     m_entries = entries;
     endResetModel();
+}
+
+void FileTableModel::updateEntries(const FileList &entries)
+{
+    QHash<QString, FileInfo> remaining;
+    for (const auto &entry : entries)
+        remaining.insert(entry.path, entry);
+    for (int row = m_entries.size() - 1; row >= 0; --row) {
+        if (!remaining.contains(m_entries.at(row).path)) {
+            beginRemoveRows({}, row, row);
+            m_entries.removeAt(row);
+            endRemoveRows();
+        }
+    }
+    for (int row = 0; row < m_entries.size(); ++row) {
+        const FileInfo updated = remaining.take(m_entries.at(row).path);
+        if (m_entries.at(row) != updated) {
+            m_entries[row] = updated;
+            emit dataChanged(index(row, 0), index(row, ColumnCount - 1));
+        }
+    }
+    for (const auto &entry : entries) {
+        if (!remaining.remove(entry.path))
+            continue;
+        const int row = m_entries.size();
+        beginInsertRows({}, row, row);
+        m_entries.append(entry);
+        endInsertRows();
+    }
 }
 
 FileInfo FileTableModel::entryAt(int row) const

@@ -94,6 +94,8 @@ int main(int argc, char *argv[])
                 QMessageBox::warning(&window, QStringLiteral("无法解析会话地址"), sessionError);
             });
         }
+    } else if (Settings::instance().showLoginDialog && !parser.isSet(screenshotOption)) {
+        QTimer::singleShot(0, &window, &MainWindow::newSession);
     }
 
     if (parser.isSet(screenshotOption)) {

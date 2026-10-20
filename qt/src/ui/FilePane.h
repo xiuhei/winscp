@@ -111,6 +111,7 @@ private:
     void updateEmptyState();
     void updateHeader();
     void setLoading(bool loading, const QString &path = {});
+    void refreshRemote(bool background);
     void addHistory(const QString &path);
     void goBack();
     void goForward();
@@ -172,6 +173,7 @@ private:
     bool m_remoteConnected = false;
     bool m_connecting = false;
     bool m_loading = false;
+    bool m_backgroundRefresh = false;
     bool m_showHidden = false;
 };
 

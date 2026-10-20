@@ -49,7 +49,6 @@ set(WINSCPQT_CORE_SOURCES
     src/ui/PreferencesDialog.cpp
     src/ui/PropertiesDialog.cpp
     src/ui/SessionEditor.cpp
-    src/ui/SiteManagerDialog.cpp
     src/ui/SyncDialog.cpp
     src/ui/TerminalPanel.cpp
     src/ui/TextEditorDialog.cpp
@@ -110,17 +109,23 @@ target_link_libraries(WinSCPQtTerminalWidgetTest PRIVATE winscpqt_lib Qt6::Test)
 add_executable(WinSCPQtWindowTest tests/window_test.cpp)
 target_link_libraries(WinSCPQtWindowTest PRIVATE winscpqt_lib Qt6::Test)
 
+add_executable(WinSCPQtUiWorkflowTest tests/ui_workflow_test.cpp)
+target_link_libraries(WinSCPQtUiWorkflowTest PRIVATE winscpqt_lib Qt6::Test)
+
 add_executable(WinSCPQtSyncSmoke tests/sync_smoke.cpp)
 target_link_libraries(WinSCPQtSyncSmoke PRIVATE winscpqt_lib)
 
 enable_testing()
 add_test(NAME terminal_screen COMMAND WinSCPQtTerminalScreenTest)
 add_test(NAME terminal_keyboard COMMAND WinSCPQtTerminalWidgetTest)
+add_test(NAME ui_workflows COMMAND WinSCPQtUiWorkflowTest)
+set_tests_properties(ui_workflows PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 set_tests_properties(terminal_keyboard PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 if(WIN32)
     target_compile_options(WinSCPQtTerminalWidgetTest PRIVATE /utf-8 /W3)
     target_compile_options(WinSCPQtWindowTest PRIVATE /utf-8 /W3)
+    target_compile_options(WinSCPQtUiWorkflowTest PRIVATE /utf-8 /W3)
     target_compile_options(WinSCPQtBackendSmoke PRIVATE /utf-8 /W3)
     target_compile_definitions(WinSCPQtBackendSmoke PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
     target_compile_options(WinSCPQtTransferSmoke PRIVATE /utf-8 /W3)

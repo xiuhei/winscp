@@ -15,10 +15,13 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMessageBox>
+#include <QMimeDatabase>
 #include <QPointer>
 #include <QProgressDialog>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QStringDecoder>
 #include <QTimer>
 #include <QUrl>
 
@@ -53,6 +56,28 @@ bool sameSource(const QJsonObject &record, const FileInfo &info)
     return info.modified.isValid() && info.size >= 0 &&
            record.value(QStringLiteral("size")).toVariant().toLongLong() == info.size &&
            record.value(QStringLiteral("modified")).toString() == info.modified.toUTC().toString(Qt::ISODateWithMs);
+}
+
+bool isText(const QByteArray &sample)
+{
+    if (sample.isEmpty())
+        return true;
+    if (sample.contains('\0'))
+        return false;
+    const auto mime = QMimeDatabase().mimeTypeForData(sample);
+    if (!mime.inherits(QStringLiteral("text/plain")) && !mime.isDefault())
+        return false;
+    QStringDecoder decoder(QStringDecoder::Utf8);
+    const QString decoded = decoder.decode(sample);
+    if (decoder.hasError())
+        return false;
+    for (const QChar ch : decoded) {
+        if (ch.category() == QChar::Other_Control && ch != QLatin1Char('\n') &&
+            ch != QLatin1Char('\r') && ch != QLatin1Char('\t') && ch != QLatin1Char('\f') &&
+            ch != QLatin1Char('\b') && ch.unicode() != 27)
+            return false;
+    }
+    return true;
 }
 
 }
@@ -154,18 +179,24 @@ void RemoteFileOpener::stated(quint64 requestId, const SessionData &session, con
         return;
     }
     if (request->verifying) {
-        if (info.size != request->file.size || info.modified != request->file.modified) {
+        const QFileInfo local(request->localPath);
+        const bool stable = info.size == request->file.size && info.modified == request->file.modified &&
+                            local.size() == info.size;
+        QFile downloaded(request->localPath);
+        const bool snapshot = !stable && info.size > request->file.size &&
+                              local.size() >= request->file.size && local.size() <= info.size &&
+                              downloaded.open(QIODevice::ReadOnly) && isText(downloaded.peek(65536));
+        if (!stable && !snapshot) {
             fail(request, QStringLiteral("下载期间远程文件已改变，请重新打开。"));
             return;
         }
-        const QFileInfo local(request->localPath);
-        request->record.insert(QStringLiteral("complete"), true);
+        request->record.insert(QStringLiteral("complete"), stable);
         request->record.insert(QStringLiteral("localModified"), QString::number(local.lastModified().toMSecsSinceEpoch()));
         writeRecord(request->directory, request->record);
         m_requests.remove(request->key);
         if (request->dialog)
             request->dialog->close();
-        openLocal(request->localPath);
+        openLocal(request->localPath, request->file.path, snapshot);
         return;
     }
     request->file = info;
@@ -203,7 +234,7 @@ void RemoteFileOpener::stated(quint64 requestId, const SessionData &session, con
         m_requests.remove(request->key);
         if (request->dialog)
             request->dialog->close();
-        openLocal(request->localPath);
+        openLocal(request->localPath, request->file.path);
         return;
     }
     if (local.exists() && !QFile::remove(request->localPath)) {
@@ -235,7 +266,7 @@ void RemoteFileOpener::update(int id)
     }
     if (row.status == TransferStatus::Completed) {
         if (request->cancelled || !QFileInfo(request->localPath).isFile() ||
-            QFileInfo(request->localPath).size() != request->file.size) {
+            QFileInfo(request->localPath).size() < request->file.size) {
             fail(request, QStringLiteral("下载文件不完整。"));
             return;
         }
@@ -266,10 +297,36 @@ void RemoteFileOpener::fail(const std::shared_ptr<Request> &request, const QStri
     emit statusMessage(message);
 }
 
-void RemoteFileOpener::openLocal(const QString &path)
+void RemoteFileOpener::openLocal(const QString &localPath, const QString &remotePath, bool readOnly)
 {
-    if (!QDesktopServices::openUrl(QUrl::fromLocalFile(path)))
-        emit statusMessage(QStringLiteral("无法打开文件：%1").arg(path));
+    QFile file(localPath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        emit statusMessage(QStringLiteral("无法读取下载文件：%1").arg(file.errorString()));
+        return;
+    }
+    const QByteArray sample = file.peek(65536);
+    if (isText(sample)) {
+        if (file.size() > 32 * 1024 * 1024) {
+            QMessageBox::information(m_parent, QStringLiteral("文件过大"),
+                QStringLiteral("内置编辑器支持不超过 32 MB 的文本。文件已下载到：\n%1").arg(localPath));
+            return;
+        }
+        const QByteArray data = file.readAll();
+        QStringDecoder decoder(QStringDecoder::Utf8);
+        const QString decoded = decoder.decode(data);
+        if (decoder.hasError() || decoded.contains(QChar::Null)) {
+            QMessageBox::information(m_parent, QStringLiteral("无法编辑"),
+                QStringLiteral("该文件不是有效的 UTF-8 文本。文件已下载到：\n%1").arg(localPath));
+            return;
+        }
+        emit textFileReady(remotePath, data, readOnly);
+        return;
+    }
+    if (!QDesktopServices::openUrl(QUrl::fromLocalFile(localPath))) {
+        const QString message = QStringLiteral("没有可用的程序打开此文件。文件已下载到：\n%1").arg(localPath);
+        QMessageBox::warning(m_parent, QStringLiteral("无法打开"), message);
+        emit statusMessage(message);
+    }
 }
 
 void RemoteFileOpener::cleanup()

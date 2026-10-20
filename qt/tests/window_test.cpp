@@ -7,6 +7,8 @@
 #include "ui/FilePane.h"
 #include "ui/SessionEditor.h"
 #include "ui/RemoteFileOpener.h"
+#include "ui/TextEditorDialog.h"
+#include "ui/FileTableModel.h"
 #include "terminal/TerminalWidget.h"
 #include "ui/MainWindow.h"
 #include "ui/TerminalPanel.h"
@@ -30,6 +32,9 @@
 #include <QLineEdit>
 #include <QMimeData>
 #include <QProgressDialog>
+#include <QProgressBar>
+#include <QPlainTextEdit>
+#include <QScrollBar>
 #include <QSaveFile>
 #include <QTableView>
 #include <QTemporaryDir>
@@ -124,6 +129,21 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(!listings.isEmpty(), 4000);
         QCOMPARE(m_remote->selectedEntries().size(), 1);
         QCOMPARE(m_remote->selectedEntries().first().name, QStringLiteral("refreshed.txt"));
+        const QRect geometry = table->geometry();
+        QSignalSpy reset(m_remote->findChild<FileTableModel *>(), &QAbstractItemModel::modelReset);
+        QSignalSpy selection(table->selectionModel(), &QItemSelectionModel::selectionChanged);
+        bool visibleLoading = false;
+        const auto loading = connect(m_fs, &FileSystemController::directoryLoading, this, [&] {
+            visibleLoading |= m_remote->findChild<QProgressBar *>()->isVisible();
+            visibleLoading |= table->geometry() != geometry;
+        });
+        listings.clear();
+        QTRY_VERIFY_WITH_TIMEOUT(!listings.isEmpty(), 4000);
+        disconnect(loading);
+        QVERIFY(!visibleLoading);
+        QCOMPARE(reset.size(), 0);
+        QCOMPARE(selection.size(), 0);
+        QCOMPARE(table->geometry(), geometry);
         refresh->setChecked(false);
 
         m_remote->navigateRemote(QStringLiteral("/home/test/navigation"));
@@ -250,7 +270,11 @@ private slots:
         QVERIFY(queue);
         queue->close();
         QSignalSpy added(transfers, &TransferManager::taskAdded);
-        const FileInfo file = entry(m_remote, QStringLiteral("drag.txt"));
+        QSignalSpy prepared(m_fs, &FileSystemController::fileWriteFinished);
+        m_fs->writeFile(QStringLiteral("/home/test/navigation/cache.bin"), QByteArrayLiteral("binary\0contents"));
+        QTRY_COMPARE_WITH_TIMEOUT(prepared.size(), 1, 10000);
+        QTRY_VERIFY_WITH_TIMEOUT(entry(m_remote, QStringLiteral("cache.bin")).isValid(), 10000);
+        const FileInfo file = entry(m_remote, QStringLiteral("cache.bin"));
         QVERIFY(file.isValid());
         m_remote->openRequested(file, true);
         auto *cancelled = m_window->findChild<QProgressDialog *>(QStringLiteral("RemoteOpenProgress"));
@@ -273,7 +297,7 @@ private slots:
 
         // Fresh stat must notice changes even while the browser listing is stale.
         QSignalSpy written(m_fs, &FileSystemController::fileWriteFinished);
-        m_fs->writeFile(file.path, QByteArrayLiteral("changed remote contents, different size"));
+        m_fs->writeFile(file.path, QByteArrayLiteral("changed\0remote contents, different size"));
         QTRY_VERIFY_WITH_TIMEOUT(!written.isEmpty(), 10000);
         m_remote->openRequested(file, true);
         QTRY_COMPARE_WITH_TIMEOUT(m_handler.opened.size(), 3, 15000);
@@ -281,13 +305,13 @@ private slots:
         QVERIFY(m_handler.opened.last().toLocalFile() != cached);
         QFile modified(m_handler.opened.last().toLocalFile());
         QVERIFY(modified.open(QIODevice::ReadOnly));
-        QCOMPARE(modified.readAll(), QByteArrayLiteral("changed remote contents, different size"));
+        QCOMPARE(modified.readAll(), QByteArrayLiteral("changed\0remote contents, different size"));
         modified.close();
 
-        m_fs->writeFile(QStringLiteral("/home/test/drag.txt"), QByteArrayLiteral("other directory"));
+        m_fs->writeFile(QStringLiteral("/home/test/cache.bin"), QByteArrayLiteral("other\0directory"));
         QTRY_COMPARE_WITH_TIMEOUT(written.size(), 2, 10000);
         FileInfo other = file;
-        other.path = QStringLiteral("/home/test/drag.txt");
+        other.path = QStringLiteral("/home/test/cache.bin");
         m_remote->openRequested(other, true);
         QTRY_COMPARE_WITH_TIMEOUT(m_handler.opened.size(), 4, 15000);
         QCOMPARE(added.size(), 3);
@@ -306,6 +330,110 @@ private slots:
         m_window->findChild<RemoteFileOpener *>()->cleanup();
         QVERIFY(!QFileInfo::exists(cached));
         QVERIFY(QFileInfo::exists(m_handler.opened.last().toLocalFile()));
+    }
+
+    void opensExtensionlessLogsAndSymlinks()
+    {
+        auto backend = createBackend(ssh.protocol);
+        QString error;
+        QVERIFY2(backend->connect(ssh, &error), qPrintable(error));
+        const QString directory = QStringLiteral("/home/test/navigation");
+        const QString name = QStringLiteral("log2026年10月19日00时00分");
+        const QString logPath = directory + QLatin1Char('/') + name;
+        const QByteArray contents = QStringLiteral("服务启动成功\nrequest completed\n").toUtf8();
+        QVERIFY2(backend->writeFile(logPath, contents, &error), qPrintable(error));
+        QVERIFY2(backend->createSymlink(name, directory + QStringLiteral("/log"), &error), qPrintable(error));
+        m_remote->navigateRemote(directory);
+        QTRY_VERIFY_WITH_TIMEOUT(entry(m_remote, QStringLiteral("log")).isValid(), 10000);
+        QVERIFY(entry(m_remote, QStringLiteral("log")).isSymlink);
+        auto *opener = m_window->findChild<RemoteFileOpener *>();
+        QSignalSpy ready(opener, &RemoteFileOpener::textFileReady);
+        QSignalSpy uploaded(m_fs, &FileSystemController::fileWriteFinished);
+        const int externalOpens = m_handler.opened.size();
+        bool editorSeen = false;
+        QByteArray displayed;
+        QTimer editorTimer;
+        connect(&editorTimer, &QTimer::timeout, this, [&] {
+            auto *editor = m_window->findChild<TextEditorDialog *>();
+            if (!editor || !editor->isVisible())
+                return;
+            editorSeen = true;
+            auto *text = editor->findChild<QPlainTextEdit *>();
+            displayed = text->toPlainText().toUtf8();
+            text->appendPlainText(QStringLiteral("saved through link"));
+            QMetaObject::invokeMethod(editor, "accept");
+        });
+        editorTimer.start(20);
+        auto *table = m_remote->findChild<QTableView *>();
+        QModelIndex logIndex;
+        for (int row = 0; row < table->model()->rowCount(); ++row)
+            if (table->model()->index(row, 0).data().toString() == QLatin1String("log"))
+                logIndex = table->model()->index(row, 0);
+        QVERIFY(logIndex.isValid());
+        table->scrollTo(logIndex);
+        const QPoint logPosition = table->visualRect(logIndex).center();
+        QTest::mouseClick(table->viewport(), Qt::LeftButton, Qt::NoModifier, logPosition);
+        QTest::mouseDClick(table->viewport(), Qt::LeftButton, Qt::NoModifier, logPosition);
+        QTest::mouseRelease(table->viewport(), Qt::LeftButton, Qt::NoModifier, logPosition);
+        QTRY_VERIFY_WITH_TIMEOUT(editorSeen, 15000);
+        QTRY_COMPARE_WITH_TIMEOUT(uploaded.size(), 1, 15000);
+        QVERIFY(uploaded.last().at(1).toBool());
+        QVERIFY(editorSeen);
+        QCOMPARE(displayed, contents);
+        QCOMPARE(ready.size(), 1);
+        QCOMPARE(ready.first().at(0).toString(), directory + QStringLiteral("/log"));
+        QCOMPARE(m_handler.opened.size(), externalOpens);
+        QByteArray saved;
+        QVERIFY2(backend->readFile(logPath, &saved, &error), qPrintable(error));
+        QVERIFY(saved.contains("saved through link"));
+        editorSeen = false;
+        m_remote->openRequested(entry(m_remote, name), true);
+        QTRY_COMPARE_WITH_TIMEOUT(uploaded.size(), 2, 15000);
+        QVERIFY(editorSeen);
+        QCOMPARE(m_handler.opened.size(), externalOpens);
+        editorTimer.stop();
+    }
+
+    void opensGrowingLogSnapshot()
+    {
+        auto backend = createBackend(ssh.protocol);
+        QString error;
+        QVERIFY2(backend->connect(ssh, &error), qPrintable(error));
+        const QString remotePath = QStringLiteral("/home/test/navigation/growing-log");
+        const QByteArray original("existing log line\n");
+        QVERIFY2(backend->writeFile(remotePath, original, &error), qPrintable(error));
+        bool appended = false;
+        bool appendSucceeded = false;
+        const auto append = connect(m_fs, &FileSystemController::fileStated, this,
+            [&](quint64, const SessionData &, const QString &path, const FileInfo &, const QString &) {
+                if (path != remotePath || appended)
+                    return;
+                appended = true;
+                appendSucceeded = backend->writeFile(remotePath, original + "new log line\n", &error);
+            });
+        bool snapshotSeen = false;
+        QTimer closeEditor;
+        connect(&closeEditor, &QTimer::timeout, this, [&] {
+            auto *editor = m_window->findChild<TextEditorDialog *>();
+            if (editor && editor->isVisible()) {
+                snapshotSeen = editor->windowTitle().contains(QStringLiteral("只读快照")) &&
+                    editor->findChild<QPlainTextEdit *>()->isReadOnly() &&
+                    editor->content().startsWith(original);
+                editor->reject();
+            }
+        });
+        closeEditor.start(20);
+        auto *opener = m_window->findChild<RemoteFileOpener *>();
+        QSignalSpy opened(opener, &RemoteFileOpener::textFileReady);
+        FileInfo file;
+        file.path = remotePath;
+        file.name = QStringLiteral("growing-log");
+        opener->open(ssh, file);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.size(), 1, 15000);
+        QVERIFY(appendSucceeded);
+        QVERIFY(snapshotSeen);
+        QVERIFY(opened.first().at(2).toBool());
+        disconnect(append);
     }
 
     void remembersDirectories()

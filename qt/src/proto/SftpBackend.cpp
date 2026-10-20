@@ -484,10 +484,10 @@ bool SftpBackend::createSymlink(const QString &target, const QString &linkPath, 
     const QString link = path::normalizeRemote(linkPath);
     const QByteArray linkBytes = remoteBytes(link);
     const QByteArray targetBytes = target.toUtf8();
-    if (libssh2_sftp_symlink_ex(static_cast<LIBSSH2_SFTP *>(m_sftp), linkBytes.constData(),
-                                static_cast<unsigned int>(linkBytes.size()),
-                                const_cast<char *>(targetBytes.constData()),
+    if (libssh2_sftp_symlink_ex(static_cast<LIBSSH2_SFTP *>(m_sftp), targetBytes.constData(),
                                 static_cast<unsigned int>(targetBytes.size()),
+                                const_cast<char *>(linkBytes.constData()),
+                                static_cast<unsigned int>(linkBytes.size()),
                                 LIBSSH2_SFTP_SYMLINK) != 0) {
         if (error)
             *error = sftpError(QStringLiteral("无法创建符号链接 %1。").arg(link));

@@ -35,6 +35,7 @@ public:
 
     void setInitialSession(const SessionData &session, bool connectNow);
     void enableDemoMode();
+    void newSession();
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -50,8 +51,6 @@ private:
     void restoreWindowSettings();
     void saveWindowSettings();
 
-    void newSession();
-    void openSiteManager();
     void connectToSession(const SessionData &session);
     void disconnectSession();
     void openPreferences();
@@ -78,6 +77,7 @@ private:
     void createFolder(const QString &parentPath, bool remote);
     void showProperties(const FileInfo &info, bool remote);
     void openFile(const FileInfo &info, bool remote);
+    void showTextEditor(const QString &path, const QByteArray &data, bool readOnly);
     void handleExternalDrop(const QList<QUrl> &urls, const QString &targetDirectory,
                             bool targetRemote);
     void handleCrossPaneDrop(const QList<FileInfo> &entries, bool sourceRemote,
@@ -153,6 +153,7 @@ private:
     bool m_connecting = false;
     bool m_demo = false;
     bool m_closing = false;
+    bool m_loginAfterDisconnect = false;
 };
 
 } // namespace wsc

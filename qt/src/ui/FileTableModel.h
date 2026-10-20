@@ -24,6 +24,7 @@ public:
     explicit FileTableModel(bool local, QObject *parent = nullptr);
 
     void setEntries(const FileList &entries);
+    void updateEntries(const FileList &entries);
     const FileList &entries() const { return m_entries; }
     FileInfo entryAt(int row) const;
     bool isLocal() const { return m_local; }

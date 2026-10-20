@@ -23,17 +23,20 @@
 
 namespace wsc {
 
-TextEditorDialog::TextEditorDialog(const QString &remotePath, const QByteArray &data, QWidget *parent)
+TextEditorDialog::TextEditorDialog(const QString &remotePath, const QByteArray &data, QWidget *parent, bool readOnly)
     : QDialog(parent)
     , m_path(remotePath)
     , m_original(data)
 {
     setWindowTitle(QStringLiteral("%1 - 编辑器").arg(path::remoteName(remotePath)));
+    if (readOnly)
+        setWindowTitle(QStringLiteral("%1 - 只读快照").arg(path::remoteName(remotePath)));
     setWindowIcon(IconProvider::instance().appIcon());
     resize(900, 680);
     setMinimumSize(560, 400);
 
     QByteArray textData = data;
+    m_crlf = data.contains("\r\n");
     if (textData.startsWith("\xEF\xBB\xBF")) {
         m_hasBom = true;
         textData.remove(0, 3);
@@ -86,6 +89,7 @@ TextEditorDialog::TextEditorDialog(const QString &remotePath, const QByteArray &
     layout->addWidget(m_findBar);
 
     m_editor = new QPlainTextEdit(this);
+    m_editor->setReadOnly(readOnly);
     QFont font(QStringLiteral("Cascadia Mono"));
     font.setStyleHint(QFont::Monospace);
     font.setPointSize(10);
@@ -109,8 +113,9 @@ TextEditorDialog::TextEditorDialog(const QString &remotePath, const QByteArray &
 
     auto *buttons = new QDialogButtonBox(this);
     auto *saveButton = buttons->addButton(QStringLiteral("保存并上传"), QDialogButtonBox::AcceptRole);
+    saveButton->setVisible(!readOnly);
     saveButton->setProperty("accent", true);
-    auto *cancelButton = buttons->addButton(QStringLiteral("取消"), QDialogButtonBox::RejectRole);
+    auto *cancelButton = buttons->addButton(readOnly ? QStringLiteral("关闭") : QStringLiteral("取消"), QDialogButtonBox::RejectRole);
     layout->addWidget(buttons);
 
     connect(buttons, &QDialogButtonBox::accepted, this, &TextEditorDialog::accept);
@@ -148,6 +153,8 @@ TextEditorDialog::TextEditorDialog(const QString &remotePath, const QByteArray &
 QByteArray TextEditorDialog::content() const
 {
     QByteArray result = m_editor->toPlainText().toUtf8();
+    if (m_crlf)
+        result.replace("\n", "\r\n");
     if (m_hasBom)
         result.prepend("\xEF\xBB\xBF");
     return result;
@@ -155,7 +162,7 @@ QByteArray TextEditorDialog::content() const
 
 void TextEditorDialog::accept()
 {
-    if (m_editor->toPlainText().toUtf8() == m_original)
+    if (m_editor->isReadOnly() || content() == m_original)
         QDialog::reject();
     else
         QDialog::accept();

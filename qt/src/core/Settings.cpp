@@ -18,8 +18,10 @@ namespace wsc {
 QJsonObject sessionToStoredJson(const SessionData &session, bool savePasswords)
 {
     SessionData copy = session;
-    if (!savePasswords || !copy.savePassword)
+    if (!savePasswords || !copy.savePassword) {
         copy.password.clear();
+        copy.passphrase.clear();
+    }
     if (!copy.password.isEmpty())
         copy.password = PasswordStore::protect(copy.password);
     if (!copy.passphrase.isEmpty())
@@ -55,6 +57,7 @@ void Settings::load()
     QSettings store(AppPaths::settingsFile(), QSettings::IniFormat);
     cacheRetentionDays = qBound(1, store.value(QStringLiteral("transfer/cacheRetentionDays"), 7).toInt(), 3650);
     autoRefresh = store.value(QStringLiteral("ui/autoRefresh"), false).toBool();
+    showLoginDialog = store.value(QStringLiteral("ui/showLoginDialog"), true).toBool();
     theme = store.value(QStringLiteral("ui/theme"), theme).toString();
     showHiddenFiles = store.value(QStringLiteral("ui/showHidden"), showHiddenFiles).toBool();
     confirmDelete = store.value(QStringLiteral("ui/confirmDelete"), confirmDelete).toBool();
@@ -110,6 +113,7 @@ void Settings::save()
     QSettings store(AppPaths::settingsFile(), QSettings::IniFormat);
     store.setValue(QStringLiteral("transfer/cacheRetentionDays"), cacheRetentionDays);
     store.setValue(QStringLiteral("ui/autoRefresh"), autoRefresh);
+    store.setValue(QStringLiteral("ui/showLoginDialog"), showLoginDialog);
     store.remove(QStringLiteral("terminal/synchronizeDirectories"));
     store.setValue(QStringLiteral("ui/theme"), theme);
     store.setValue(QStringLiteral("ui/showHidden"), showHiddenFiles);

@@ -21,6 +21,7 @@ public:
 
 signals:
     void statusMessage(const QString &message);
+    void textFileReady(const QString &remotePath, const QByteArray &data, bool readOnly);
 
 private:
     struct Request;
@@ -28,7 +29,7 @@ private:
                 const QString &error);
     void update(int id);
     void fail(const std::shared_ptr<Request> &request, const QString &message);
-    void openLocal(const QString &path);
+    void openLocal(const QString &localPath, const QString &remotePath, bool readOnly = false);
     quint64 m_nextRequestId = 1;
     FileSystemController *m_files;
     TransferManager *m_transfers;

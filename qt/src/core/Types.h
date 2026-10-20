@@ -44,6 +44,8 @@ struct FileInfo {
     QString owner;
     QString group;
 
+    bool operator==(const FileInfo &) const = default;
+
     bool isValid() const { return !name.isEmpty(); }
     bool isFile() const { return !isDir; }
 

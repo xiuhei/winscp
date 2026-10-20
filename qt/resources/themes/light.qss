@@ -47,3 +47,5 @@ QWidget#TerminalView { background: #000000; }
 QStatusBar { background: #f0f0f0; border-top: 1px solid #b0b0b0; }
 QStatusBar::item { border: none; }
 QDockWidget::title { background: #f0f0f0; padding: 2px 4px; }
+QListWidget#LoginSites { border: 1px solid #a0a0a0; background: white; }
+QListWidget#LoginSites::item { padding: 5px; }

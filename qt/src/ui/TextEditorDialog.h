@@ -15,7 +15,7 @@ namespace wsc {
 class TextEditorDialog : public QDialog {
     Q_OBJECT
 public:
-    TextEditorDialog(const QString &remotePath, const QByteArray &data, QWidget *parent = nullptr);
+    TextEditorDialog(const QString &remotePath, const QByteArray &data, QWidget *parent = nullptr, bool readOnly = false);
 
     QByteArray content() const;
 
@@ -38,6 +38,7 @@ private:
     QLabel *m_statusLabel = nullptr;
     QLabel *m_modifiedLabel = nullptr;
     bool m_hasBom = false;
+    bool m_crlf = false;
 };
 
 } // namespace wsc

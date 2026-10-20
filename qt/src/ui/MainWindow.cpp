@@ -16,7 +16,6 @@
 #include "ui/LoginDialog.h"
 #include "ui/PreferencesDialog.h"
 #include "ui/PropertiesDialog.h"
-#include "ui/SiteManagerDialog.h"
 #include "ui/SyncDialog.h"
 #include "ui/TerminalPanel.h"
 #include "ui/TextEditorDialog.h"
@@ -232,7 +231,7 @@ void MainWindow::buildActions()
     m_logAction = makeAction(QStringLiteral("打开日志文件(&L)"), QStringLiteral("text"));
 
     connect(m_newSessionAction, &QAction::triggered, this, &MainWindow::newSession);
-    connect(m_siteManagerAction, &QAction::triggered, this, &MainWindow::openSiteManager);
+    connect(m_siteManagerAction, &QAction::triggered, this, &MainWindow::newSession);
     connect(m_connectAction, &QAction::triggered, this, [this] {
         if (m_session.isValid() && m_session.protocol != Protocol::Local)
             connectToSession(m_session);
@@ -506,7 +505,7 @@ void MainWindow::connectSignals()
     connect(m_remotePane, &FilePane::connectRequested, this, &MainWindow::newSession);
     connect(m_remotePane, &FilePane::disconnectRequested, this, &MainWindow::disconnectSession);
     connect(m_remotePane, &FilePane::newSessionRequested, this, &MainWindow::newSession);
-    connect(m_remotePane, &FilePane::siteManagerRequested, this, &MainWindow::openSiteManager);
+    connect(m_remotePane, &FilePane::siteManagerRequested, this, &MainWindow::newSession);
     connect(m_remotePane, &FilePane::terminalRequested, this, &MainWindow::openTerminal);
 
     connect(m_remoteFs, &FileSystemController::connecting, this, [this](const SessionData &session) {
@@ -536,6 +535,7 @@ void MainWindow::connectSignals()
 
     connect(m_fileOpener, &RemoteFileOpener::statusMessage, this,
             [this](const QString &message) { showStatus(message, true); });
+    connect(m_fileOpener, &RemoteFileOpener::textFileReady, this, &MainWindow::showTextEditor);
     connect(m_terminalPanel, &TerminalPanel::connectRequested, this, [this] {
         newSession();
     });
@@ -638,21 +638,6 @@ void MainWindow::newSession()
     SessionData session = dialog.session();
     if (session.protocol == Protocol::Local)
         return;
-    if (dialog.saveAsSite()) {
-        SiteStore::instance().addOrUpdate(session);
-        SiteStore::instance().save();
-    }
-    connectToSession(session);
-}
-
-void MainWindow::openSiteManager()
-{
-    SiteManagerDialog dialog(m_session, this);
-    if (dialog.exec() != QDialog::Accepted)
-        return;
-    const SessionData session = dialog.selectedSession();
-    if (!session.isValid() || session.protocol == Protocol::Local)
-        return;
     connectToSession(session);
 }
 
@@ -697,6 +682,7 @@ void MainWindow::disconnectSession()
         return;
     }
     m_remoteFs->disconnectFromHost();
+    m_loginAfterDisconnect = Settings::instance().showLoginDialog;
     showStatus(QStringLiteral("正在断开连接…"));
 }
 
@@ -752,6 +738,13 @@ void MainWindow::onRemoteDisconnected(const QString &reason)
     updateActions();
     m_siteLabel->setText(QStringLiteral("未连接"));
     showStatus(reason.isEmpty() ? QStringLiteral("连接已断开。") : reason);
+    if (m_loginAfterDisconnect && !m_closing) {
+        QTimer::singleShot(0, this, [this] {
+            if (!m_closing && !m_connected && !m_connecting)
+                newSession();
+        });
+    }
+    m_loginAfterDisconnect = false;
 }
 
 void MainWindow::onDirectoryListed(const QString &path, const QList<FileInfo> &entries)
@@ -775,12 +768,17 @@ void MainWindow::onOperationFinished(const QString &action, bool success, const 
 
 void MainWindow::onFileRead(const QString &path, const QByteArray &data)
 {
+    showTextEditor(path, data, false);
+}
+
+void MainWindow::showTextEditor(const QString &path, const QByteArray &data, bool readOnly)
+{
     if (data.contains('\0')) {
         QMessageBox::information(this, QStringLiteral("无法编辑"),
                                  QStringLiteral("该文件看起来是二进制文件，无法使用内置编辑器打开。"));
         return;
     }
-    TextEditorDialog dialog(path, data, this);
+    TextEditorDialog dialog(path, data, this, readOnly);
     if (dialog.exec() == QDialog::Accepted)
         m_remoteFs->writeFile(path, dialog.content());
 }
