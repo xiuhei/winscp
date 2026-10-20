@@ -25,15 +25,13 @@ public:
     bool showHiddenFiles = false;
     bool confirmDelete = true;
     bool confirmOverwrite = true;
-    QString conflictPolicy = QStringLiteral("ask"); // ask | overwrite | skip | resume
+    QString conflictPolicy = QStringLiteral("ask"); // ask | overwrite | skip
     int parallelTransfers = 2;
     int cacheRetentionDays = 7;
     bool autoRefresh = false;
     bool showLoginDialog = true;
     bool preserveTimestamps = true;
     bool preservePermissions = true;
-    bool showTransferQueue = true;
-    bool showLogPanel = false;
     bool savePasswords = true;
     bool askUnknownHostKey = true;
     bool confirmExit = false;

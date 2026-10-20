@@ -4,3 +4,5 @@ dist/
 *.suo
 tests/test_host_key
 tests/*.log
+__pycache__/
+*.pyc

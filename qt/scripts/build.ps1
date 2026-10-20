@@ -4,7 +4,7 @@
 param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release",
-    [string]$QtRoot = $env:DBGATE_QT_ROOT,
+    [string]$QtRoot = $env:WINSCPQT_QT_ROOT,
     [string]$VcpkgRoot = $env:VCPKG_ROOT
 )
 

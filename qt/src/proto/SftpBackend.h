@@ -45,7 +45,6 @@ public:
 
     bool supportsUnixPermissions() const override { return true; }
     bool supportsSymlinks() const override { return true; }
-    bool supportsResume() const override { return true; }
     bool canSetModifiedTime() const override { return true; }
     bool setModifiedTime(const QString &path, const QDateTime &time, QString *error) override;
     void keepAlive() override;

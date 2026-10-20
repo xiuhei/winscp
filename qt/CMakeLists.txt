@@ -33,7 +33,7 @@ set(WINSCPQT_CORE_SOURCES
     src/proto/SftpBackend.cpp
     src/proto/WebDavBackend.cpp
     src/ssh/SshConnection.cpp
-    src/sync/SyncTypes.cpp
+    src/sync/SyncPlanner.cpp
     src/terminal/SshShellSession.cpp
     src/terminal/TerminalScreen.cpp
     src/terminal/TerminalWidget.cpp

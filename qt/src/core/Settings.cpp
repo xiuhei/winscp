@@ -26,7 +26,6 @@ QJsonObject sessionToStoredJson(const SessionData &session, bool savePasswords)
         copy.password = PasswordStore::protect(copy.password);
     if (!copy.passphrase.isEmpty())
         copy.passphrase = PasswordStore::protect(copy.passphrase);
-    copy.rawSettings.clear();
     return copy.toJson();
 }
 
@@ -74,9 +73,6 @@ void Settings::load()
     terminalScrollback =
         store.value(QStringLiteral("terminal/scrollback"), terminalScrollback).toInt();
     terminalShell = store.value(QStringLiteral("terminal/shell"), terminalShell).toString();
-    showTransferQueue =
-        store.value(QStringLiteral("ui/showTransferQueue"), showTransferQueue).toBool();
-    showLogPanel = store.value(QStringLiteral("ui/showLogPanel"), showLogPanel).toBool();
     savePasswords = store.value(QStringLiteral("security/savePasswords"), savePasswords).toBool();
     askUnknownHostKey =
         store.value(QStringLiteral("security/askUnknownHostKey"), askUnknownHostKey).toBool();
@@ -128,8 +124,6 @@ void Settings::save()
     store.setValue(QStringLiteral("terminal/fontSize"), terminalFontSize);
     store.setValue(QStringLiteral("terminal/scrollback"), terminalScrollback);
     store.setValue(QStringLiteral("terminal/shell"), terminalShell);
-    store.setValue(QStringLiteral("ui/showTransferQueue"), showTransferQueue);
-    store.setValue(QStringLiteral("ui/showLogPanel"), showLogPanel);
     store.setValue(QStringLiteral("security/savePasswords"), savePasswords);
     store.setValue(QStringLiteral("security/askUnknownHostKey"), askUnknownHostKey);
     store.setValue(QStringLiteral("ui/confirmExit"), confirmExit);

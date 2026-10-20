@@ -2,9 +2,9 @@
 param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Debug",
-    [string]$QtRoot = $env:DBGATE_QT_ROOT,
+    [string]$QtRoot = $env:WINSCPQT_QT_ROOT,
     [string]$VcpkgRoot = $env:VCPKG_ROOT,
-    [string]$PackageName = "WinSCPQt-refresh-win64"
+    [string]$PackageName = "WinSCPQt-1.0.0-win64"
 )
 
 $ErrorActionPreference = "Stop"
@@ -76,7 +76,7 @@ try {
     docker run -d --rm --name $containerName --mount "type=bind,source=$roots,target=/data" `
         -p 127.0.0.1:22222:22222 -p 127.0.0.1:22223:22223 `
         -p 127.0.0.1:21212:21212 -p 127.0.0.1:21213:21213 -p 127.0.0.1:18080:18080 `
-        -p 127.0.0.1:50000-50019:50000-50019 winscpqt-tests:local python /tests/run_servers.py
+        -p 127.0.0.1:50000-50019:50000-50019 winscpqt-tests:local python /tests/run_test_servers.py
     if ($LASTEXITCODE -ne 0) { throw "Test container failed to start" }
     $started = $true
     foreach ($port in @(22222, 22223, 21212, 21213, 18080)) { Wait-Port $port }

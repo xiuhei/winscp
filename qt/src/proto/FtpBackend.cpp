@@ -156,15 +156,12 @@ bool FtpBackend::connect(const SessionData &session, QString *error)
     m_host = session.hostName;
     m_port = session.port > 0 ? session.port : defaultPort(session.protocol);
     m_user = session.userName;
-    m_password = session.password;
     m_verifyTls = session.tlsVerifyCertificate;
     m_useMlsd = false;
     m_useMlst = false;
     m_useEpsv = false;
     m_useUtf8 = false;
-    m_useRest = false;
     m_mlsdFailed = false;
-    m_passive = session.passiveMode;
     m_timeoutMs = std::max(5, session.timeoutSeconds) * 1000;
     m_dataTimeoutMs = std::max(30, session.timeoutSeconds) * 1000;
     m_tlsErrors.clear();
@@ -340,8 +337,6 @@ bool FtpBackend::login(const SessionData &session, QString *error)
                 m_useMlst = true;
             if (upper.contains(QStringLiteral("EPSV")))
                 m_useEpsv = true;
-            if (upper.contains(QStringLiteral("REST STREAM")))
-                m_useRest = true;
             if (upper.contains(QStringLiteral("UTF8")))
                 m_useUtf8 = true;
         }

@@ -8,7 +8,7 @@ import time
 def main():
     for name in ("sftp", "ftp", "ftps", "dav"):
         os.makedirs(f"/data/{name}", exist_ok=True)
-    subprocess.run([sys.executable, "/tests/gen_cert.py", "/tmp/cert.pem", "/tmp/key.pem"], check=True)
+    subprocess.run([sys.executable, "/tests/generate_test_certificate.py", "/tmp/cert.pem", "/tmp/key.pem"], check=True)
     subprocess.run(["ssh-keygen", "-A"], check=True)
     with open("/etc/ssh/sshrc", "w") as handle:
         handle.write('printf "%s\\n" "$SSH_CONNECTION" > "$HOME/.terminal-connection"\n')

@@ -2,7 +2,7 @@
 #include "core/Backend.h"
 #include "core/PathUtils.h"
 #include "core/SessionData.h"
-#include "sync/SyncTypes.h"
+#include "sync/SyncPlanner.h"
 
 #include <QCoreApplication>
 #include <QDir>

@@ -1,4 +1,4 @@
-#include "sync/SyncTypes.h"
+#include "sync/SyncPlanner.h"
 
 #include "core/PathUtils.h"
 #include "proto/LocalBackend.h"

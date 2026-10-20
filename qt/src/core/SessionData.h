@@ -5,7 +5,6 @@
 
 #include <QJsonObject>
 #include <QMetaType>
-#include <QStringList>
 
 namespace wsc {
 
@@ -23,22 +22,13 @@ struct SessionData {
     QString passphrase;
     QString remoteDirectory;
     QString localDirectory;
-    QString note;
-    QString color; // optional accent color for a site
 
     bool savePassword = true;
-    bool passiveMode = true;
     bool implicitTls = false;
     bool tlsVerifyCertificate = true;
     bool webDavHttps = false;
-    bool compression = true;
-    bool agentForwarding = false;
     int timeoutSeconds = 20;
     int keepAliveSeconds = 30;
-    int maxConnections = 2;
-
-    /// Additional raw settings, kept for WinSCP compatible site imports.
-    QStringList rawSettings;
 
     bool isValid() const;
     bool isLocal() const { return protocol == Protocol::Local; }
@@ -54,9 +44,6 @@ struct SessionData {
 
     bool operator==(const SessionData &other) const;
 };
-
-/// Parse a WinSCP-style session URL (sftp://user:pass@host:22/path).
-QString sessionUrlEncode(const QString &value);
 
 } // namespace wsc
 

@@ -3,7 +3,7 @@
 
 #include "core/Backend.h"
 #include "core/SessionData.h"
-#include "sync/SyncTypes.h"
+#include "sync/SyncPlanner.h"
 
 #include <QDialog>
 

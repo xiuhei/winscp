@@ -68,8 +68,6 @@ public:
 
     virtual bool supportsUnixPermissions() const { return false; }
     virtual bool supportsSymlinks() const { return false; }
-    virtual bool supportsResume() const { return false; }
-    virtual bool supportsDirectories() const { return true; }
     virtual bool canSetModifiedTime() const { return false; }
     virtual bool setModifiedTime(const QString &, const QDateTime &, QString *error)
     {

@@ -83,7 +83,6 @@ private:
     QString m_host;
     int m_port = 21;
     QString m_user;
-    QString m_password;
     QString m_cwd = QStringLiteral("/");
     QString m_home = QStringLiteral("/");
     bool m_connected = false;
@@ -93,13 +92,9 @@ private:
     bool m_useMlst = false;
     bool m_useEpsv = false;
     bool m_useUtf8 = false;
-    bool m_useRest = false;
-    bool m_passive = true;
     int m_timeoutMs = 20000;
     int m_dataTimeoutMs = 60000;
-    int m_currentSocketTimeout = 20000;
     bool m_mlsdFailed = false;
-    bool m_multiline = false;
     QStringList m_tlsErrors;
     QByteArray m_sessionTicket;
 };

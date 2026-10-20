@@ -666,8 +666,6 @@ ConflictAction TransferManager::resolveConflict(const QString &targetPath,
         return ConflictAction::Overwrite;
     if (policy == QLatin1String("skip"))
         return ConflictAction::Skip;
-    if (policy == QLatin1String("resume"))
-        return ConflictAction::Overwrite;
     if (m_shuttingDown || !m_conflictResolver)
         return ConflictAction::Overwrite;
     ConflictAction action = ConflictAction::Overwrite;

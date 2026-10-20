@@ -12,7 +12,7 @@ from cryptography.x509.oid import NameOID
 
 def main() -> int:
     if len(sys.argv) != 3:
-        print("usage: gen_cert.py <cert.pem> <key.pem>")
+        print("usage: generate_test_certificate.py <cert.pem> <key.pem>")
         return 2
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "127.0.0.1")])

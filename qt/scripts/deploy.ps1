@@ -2,7 +2,7 @@
 # Build a portable Release package with all Qt and vcpkg runtime dependencies.
 [CmdletBinding()]
 param(
-    [string]$QtRoot = $env:DBGATE_QT_ROOT,
+    [string]$QtRoot = $env:WINSCPQT_QT_ROOT,
     [string]$VcpkgRoot = $env:VCPKG_ROOT,
     [string]$PackageName = ""
 )
@@ -37,16 +37,12 @@ New-Item -ItemType Directory -Force $packageDir | Out-Null
 Copy-Item (Join-Path $releaseDir "WinSCPQt.exe") $packageDir
 Copy-Item (Join-Path $sourceRoot "README.md") $packageDir
 Copy-Item (Join-Path $sourceRoot "LICENSE") $packageDir
-Copy-Item (Join-Path $sourceRoot "FEATURE_REVIEW.md") $packageDir
 Copy-Item (Join-Path $sourceRoot "THIRD_PARTY.md") $packageDir
 Copy-Item (Join-Path $sourceRoot "licenses") (Join-Path $packageDir "licenses") -Recurse
 foreach ($moduleName in @("qtbase", "qtsvg")) {
     Get-ChildItem -LiteralPath (Join-Path $QtRoot "sbom") -Filter "$moduleName-*.spdx" |
         Where-Object { $_.Name -notlike "*.source.spdx" } |
         Copy-Item -Destination (Join-Path $packageDir "licenses/qt")
-}
-if (Test-Path (Join-Path $sourceRoot "docs")) {
-    Copy-Item (Join-Path $sourceRoot "docs") (Join-Path $packageDir "docs") -Recurse
 }
 Set-Content -Path (Join-Path $packageDir "portable.ini") -Value "" -Encoding ASCII
 

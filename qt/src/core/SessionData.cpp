@@ -1,8 +1,5 @@
 #include "core/SessionData.h"
 
-#include "core/PathUtils.h"
-
-#include <QJsonArray>
 #include <QJsonValue>
 #include <QUrl>
 #include <QUrlQuery>
@@ -47,18 +44,12 @@ QString SessionData::rootLabel() const
     return label;
 }
 
-QString sessionUrlEncode(const QString &value)
-{
-    return QString::fromLatin1(QUrl::toPercentEncoding(value));
-}
-
 QString SessionData::url(bool includePassword) const
 {
     if (protocol == Protocol::Local)
         return QStringLiteral("local://");
     QUrl url;
-    url.setScheme(protocolId(protocol) == QLatin1String("ftps") ? QStringLiteral("ftps")
-                                                               : protocolId(protocol));
+    url.setScheme(protocolId(protocol));
     url.setHost(hostName);
     url.setPort(port);
     url.setUserName(userName);
@@ -84,20 +75,12 @@ QJsonObject SessionData::toJson() const
         obj.insert(QStringLiteral("passphrase"), passphrase);
     obj.insert(QStringLiteral("remoteDirectory"), remoteDirectory);
     obj.insert(QStringLiteral("localDirectory"), localDirectory);
-    obj.insert(QStringLiteral("note"), note);
-    obj.insert(QStringLiteral("color"), color);
     obj.insert(QStringLiteral("savePassword"), savePassword);
-    obj.insert(QStringLiteral("passiveMode"), passiveMode);
     obj.insert(QStringLiteral("implicitTls"), implicitTls);
     obj.insert(QStringLiteral("tlsVerify"), tlsVerifyCertificate);
     obj.insert(QStringLiteral("webDavHttps"), webDavHttps);
-    obj.insert(QStringLiteral("compression"), compression);
-    obj.insert(QStringLiteral("agentForwarding"), agentForwarding);
     obj.insert(QStringLiteral("timeout"), timeoutSeconds);
     obj.insert(QStringLiteral("keepAlive"), keepAliveSeconds);
-    obj.insert(QStringLiteral("maxConnections"), maxConnections);
-    if (!rawSettings.isEmpty())
-        obj.insert(QStringLiteral("rawSettings"), QJsonArray::fromStringList(rawSettings));
     return obj;
 }
 
@@ -117,21 +100,12 @@ SessionData SessionData::fromJson(const QJsonObject &object)
     data.passphrase = object.value(QStringLiteral("passphrase")).toString();
     data.remoteDirectory = object.value(QStringLiteral("remoteDirectory")).toString();
     data.localDirectory = object.value(QStringLiteral("localDirectory")).toString();
-    data.note = object.value(QStringLiteral("note")).toString();
-    data.color = object.value(QStringLiteral("color")).toString();
     data.savePassword = object.value(QStringLiteral("savePassword")).toBool(true);
-    data.passiveMode = object.value(QStringLiteral("passiveMode")).toBool(true);
     data.implicitTls = object.value(QStringLiteral("implicitTls")).toBool(false);
     data.tlsVerifyCertificate = object.value(QStringLiteral("tlsVerify")).toBool(true);
     data.webDavHttps = object.value(QStringLiteral("webDavHttps")).toBool(false);
-    data.compression = object.value(QStringLiteral("compression")).toBool(true);
-    data.agentForwarding = object.value(QStringLiteral("agentForwarding")).toBool(false);
     data.timeoutSeconds = object.value(QStringLiteral("timeout")).toInt(20);
     data.keepAliveSeconds = object.value(QStringLiteral("keepAlive")).toInt(30);
-    data.maxConnections = object.value(QStringLiteral("maxConnections")).toInt(2);
-    const QJsonArray raw = object.value(QStringLiteral("rawSettings")).toArray();
-    for (const auto &value : raw)
-        data.rawSettings.append(value.toString());
     return data;
 }
 
@@ -157,12 +131,8 @@ bool SessionData::parseUrl(const QString &input, SessionData *session, QString *
     }
 
     // WinSCP accepts a plain "user@host" or "host" as SFTP.
-    if (!text.contains(QStringLiteral("://"))) {
-        const QString candidate = text.contains(QLatin1Char('@')) || text.contains(QLatin1Char(':'))
-                                      ? QStringLiteral("sftp://") + text
-                                      : QStringLiteral("sftp://") + text;
-        return parseUrl(candidate, session, error);
-    }
+    if (!text.contains(QStringLiteral("://")))
+        return parseUrl(QStringLiteral("sftp://") + text, session, error);
 
     QUrl url(text, QUrl::TolerantMode);
     if (!url.isValid()) {
@@ -209,11 +179,6 @@ bool SessionData::parseUrl(const QString &input, SessionData *session, QString *
     if (query.hasQueryItem(QStringLiteral("implicit"))) {
         const QString value = query.queryItemValue(QStringLiteral("implicit")).toLower();
         data.implicitTls = !(value == QLatin1String("0") || value == QLatin1String("false") ||
-                             value == QLatin1String("no"));
-    }
-    if (query.hasQueryItem(QStringLiteral("passive"))) {
-        const QString value = query.queryItemValue(QStringLiteral("passive")).toLower();
-        data.passiveMode = !(value == QLatin1String("0") || value == QLatin1String("false") ||
                              value == QLatin1String("no"));
     }
     if (data.hostName.isEmpty()) {

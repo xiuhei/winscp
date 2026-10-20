@@ -38,6 +38,46 @@ private slots:
         Theme::apply(QStringLiteral("light"));
     }
 
+    void sessionConfigurationRoundTrip()
+    {
+        SessionData session;
+        QString error;
+        QVERIFY2(SessionData::parseUrl(QStringLiteral("tester@example.test:2222/logs"), &session, &error),
+                 qPrintable(error));
+        QCOMPARE(session.protocol, Protocol::Sftp);
+        QCOMPARE(session.hostName, QStringLiteral("example.test"));
+        QCOMPARE(session.port, 2222);
+        QCOMPARE(session.userName, QStringLiteral("tester"));
+        QCOMPARE(session.remoteDirectory, QStringLiteral("/logs"));
+        QCOMPARE(session.url(), QStringLiteral("sftp://tester@example.test:2222/logs"));
+
+        session.privateKeyFile = QStringLiteral("id_ed25519");
+        session.timeoutSeconds = 45;
+        session.keepAliveSeconds = 60;
+        QJsonObject stored = session.toJson();
+        stored.insert(QStringLiteral("compression"), true);
+        stored.insert(QStringLiteral("passiveMode"), false);
+        stored.insert(QStringLiteral("maxConnections"), 8);
+        stored.insert(QStringLiteral("agentForwarding"), true);
+        stored.insert(QStringLiteral("rawSettings"), QStringLiteral("unused"));
+        const SessionData restored = SessionData::fromJson(stored);
+        QCOMPARE(restored.url(), session.url());
+        QCOMPARE(restored.privateKeyFile, session.privateKeyFile);
+        QCOMPARE(restored.timeoutSeconds, 45);
+        QCOMPARE(restored.keepAliveSeconds, 60);
+        QCOMPARE(restored.toJson(), session.toJson());
+
+        QVERIFY(SessionData::parseUrl(QStringLiteral("ftps://tester@example.test:990/?insecure=1&implicit=1"),
+                                     &session, &error));
+        QCOMPARE(session.protocol, Protocol::Ftps);
+        QVERIFY(session.implicitTls);
+        QVERIFY(!session.tlsVerifyCertificate);
+        const SessionData ftps = SessionData::fromJson(session.toJson());
+        QCOMPARE(ftps.url(), session.url());
+        QVERIFY(ftps.implicitTls);
+        QVERIFY(!ftps.tlsVerifyCertificate);
+    }
+
     void refreshPreservesView()
     {
         FilePane pane(FilePane::Role::Remote);

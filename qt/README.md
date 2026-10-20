@@ -33,7 +33,7 @@ Windows 文件管理器，使用 C++20、Qt 6 Widgets、libssh2 和 Qt Network�
 
 ## 构建与发布
 
-依赖 Windows 10/11 x64、Visual Studio 2022、Qt 6.5+、CMake 3.21+ 和 vcpkg 的 libssh2/OpenSSL。默认路径为 `C:\environment\Qt\6.10.3\msvc2022_64` 和 `C:\environment\vcpkg`，可通过 `DBGATE_QT_ROOT`、`VCPKG_ROOT` 或脚本参数覆盖。
+依赖 Windows 10/11 x64、Visual Studio 2022、Qt 6.5+、CMake 3.21+ 和 vcpkg 的 libssh2/OpenSSL。默认路径为 `C:\environment\Qt\6.10.3\msvc2022_64` 和 `C:\environment\vcpkg`，可通过 `WINSCPQT_QT_ROOT`、`VCPKG_ROOT` 或脚本参数覆盖。
 
 ```powershell
 .\qt\scripts\build.ps1 -Configuration Debug
@@ -65,7 +65,7 @@ WinSCPQt.exe --demo --screenshot preview.png
 
 - 不是原版 WinSCP 的全部功能移植：不含 S3、.NET 程序集、原版脚本语言、会话导入和主密码。
 - SCP 使用 SSH exec 的 POSIX 命令及文件流，需要服务器提供相应命令，不适用于受限的纯 SCP 协议端点。
-- 不支持断点续传、FTP 主动模式、SSH 压缩、代理转发、跳板和端口转发；相关未生效配置见 [功能精简清单](FEATURE_REVIEW.md)。
+- 不支持断点续传、FTP 主动模式、SSH 压缩、代理转发、跳板和端口转发。
 - 终端实现 VT/xterm 常用子集，不具备 Xshell 的全部协议、会话和鼠标报告功能。
 
 ## 结构与许可
