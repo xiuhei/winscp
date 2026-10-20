@@ -380,7 +380,8 @@ void FilePane::buildUi()
     m_emptyLabel = new QLabel(QStringLiteral("此文件夹为空"), m_table->viewport());
     m_emptyLabel->setAlignment(Qt::AlignCenter);
     m_emptyLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
-    m_emptyLabel->setStyleSheet(QStringLiteral("color: #7f8da2; background: transparent; font-size: 9pt;"));
+    m_emptyLabel->setStyleSheet(QStringLiteral("color: %1; background: transparent; font-size: 9pt;")
+                                  .arg(Theme::muted().name()));
     m_emptyLabel->hide();
 
     buildWelcomePage();

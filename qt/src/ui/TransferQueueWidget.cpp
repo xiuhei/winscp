@@ -42,7 +42,7 @@ public:
         painter->save();
         painter->setRenderHint(QPainter::Antialiasing, true);
         const QRectF outer = option.rect.adjusted(6, 9, -6, -9);
-        const QColor background = Theme::isDark() ? QColor(QStringLiteral("#141a21"))
+        const QColor background = Theme::isDark() ? QColor(QStringLiteral("#1c1c1c"))
                                                   : QColor(QStringLiteral("#eef2f7"));
         painter->setPen(Qt::NoPen);
         painter->setBrush(background);

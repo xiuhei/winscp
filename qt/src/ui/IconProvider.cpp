@@ -100,7 +100,7 @@ public:
     {
         QColor color = m_color.isValid() ? m_color : Theme::iconColor();
         if (mode == QIcon::Disabled)
-            color = Theme::isDark() ? QColor(QStringLiteral("#9aa7b5")) : QColor(QStringLiteral("#8c939b"));
+            color = Theme::isDark() ? QColor(QStringLiteral("#a0a0a0")) : QColor(QStringLiteral("#8c939b"));
         return IconProvider::instance().pixmap(m_name, qMin(size.width(), size.height()), color);
     }
     void paint(QPainter *painter, const QRect &rect, QIcon::Mode mode, QIcon::State state) override

@@ -1,11 +1,11 @@
 QToolBar {
-    background: #232830;
+    background: #2b2b2b;
     border: none;
-    border-bottom: 1px solid #424a55;
+    border-bottom: 1px solid #555555;
     spacing: 1px;
     padding: 1px 2px;
 }
-QToolBar::separator { width: 1px; background: #424a55; margin: 2px 3px; }
+QToolBar::separator { width: 1px; background: #555555; margin: 2px 3px; }
 QToolButton { padding: 1px; }
 QMenuBar::item { padding: 2px 6px; }
 QMenu::item { padding: 3px 24px 3px 22px; }
@@ -15,41 +15,41 @@ QComboBox QLineEdit { padding: 0; }
 QHeaderView::section { padding: 2px 4px; font-weight: normal; }
 QTableView, QTreeView, QListView { border: none; }
 QTableView::item, QTreeView::item { padding: 0 3px; }
-QSplitter::handle { background: #424a55; }
+QSplitter::handle { background: #555555; }
 QSplitter::handle:vertical { height: 3px; }
 QSplitter::handle:horizontal { width: 3px; }
 QFrame#Pane, QFrame#TerminalPanel {
-    background: #1b212b;
-    border: 1px solid #424a55;
+    background: #202020;
+    border: 1px solid #555555;
 }
-QFrame#Pane[active="true"] { border-color: #7594b5; }
+QFrame#Pane[active="true"] { border-color: #8a8a8a; }
 QFrame#PaneHeader, QFrame#TerminalToolbar {
-    background: #232830;
+    background: #2b2b2b;
     border: none;
-    border-bottom: 1px solid #424a55;
+    border-bottom: 1px solid #555555;
 }
-QLabel#PaneBadge { color: #aab4c0; padding: 0 2px; }
-QLabel#PaneTitle { color: #d7deea; }
-QLabel#PaneFooter, QLabel#TerminalHint { color: #aab4c0; }
-QFrame#PaneFooterLine { background: #424a55; max-height: 1px; border: none; }
+QLabel#PaneBadge { color: #b6b6b6; padding: 0 2px; }
+QLabel#PaneTitle { color: #dedede; }
+QLabel#PaneFooter, QLabel#TerminalHint { color: #b6b6b6; }
+QFrame#PaneFooterLine { background: #555555; max-height: 1px; border: none; }
 QLineEdit#FilterEdit { padding: 0 2px; }
-QWidget#WelcomePage { background: #1b212b; }
+QWidget#WelcomePage { background: #202020; }
 QLabel#WelcomeTitle { font-size: 10pt; font-weight: bold; }
-QLabel#WelcomeText { color: #aab4c0; }
+QLabel#WelcomeText { color: #b6b6b6; }
 QTabWidget::pane { border: none; }
 QTabBar::tab {
-    background: #232830;
-    border: 1px solid #424a55;
+    background: #2b2b2b;
+    border: 1px solid #555555;
     padding: 2px 7px;
     margin-right: 1px;
 }
-QTabBar::tab:selected { background: #1b212b; border-bottom-color: #1b212b; }
+QTabBar::tab:selected { background: #202020; border-bottom-color: #202020; }
 QWidget#TerminalView { background: #000000; }
-QStatusBar { background: #232830; border-top: 1px solid #424a55; }
+QStatusBar { background: #2b2b2b; border-top: 1px solid #555555; }
 QStatusBar::item { border: none; }
-QDockWidget::title { background: #232830; padding: 2px 4px; }
-QListWidget#LoginSites { border: 1px solid #68717e; background: #1b212b; }
+QDockWidget::title { background: #2b2b2b; padding: 2px 4px; }
+QListWidget#LoginSites { border: 1px solid #808080; background: #202020; }
 QListWidget#LoginSites::item { padding: 5px; }
-QGroupBox { border: 1px solid #68717e; margin-top: 9px; }
-QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 3px; color: #edf1f5; }
+QGroupBox { border: 1px solid #808080; margin-top: 9px; }
+QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 3px; color: #f0f0f0; }
 QPushButton { min-height: 24px; padding: 2px 12px; }
