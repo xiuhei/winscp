@@ -6,6 +6,8 @@
 
 #include <QFrame>
 #include <QList>
+#include <atomic>
+#include <memory>
 
 class QComboBox;
 class QLabel;
@@ -35,7 +37,7 @@ public:
     };
 
     explicit FilePane(Role role, QWidget *parent = nullptr);
-    ~FilePane() override = default;
+    ~FilePane() override;
 
     Role role() const { return m_role; }
     bool isRemote() const { return m_role == Role::Remote; }
@@ -116,7 +118,7 @@ private:
     void goBack();
     void goForward();
     void activateCurrent();
-    bool loadLocalDirectory(const QString &path, bool addHistory);
+    void loadLocalDirectory(const QString &path, bool addHistory);
     void updateCombo(const QString &path);
     void showContextMenu(const QPoint &position);
     void handleDrop(const QList<FileInfo> &sourceEntries, bool sourceRemote,
@@ -164,6 +166,8 @@ private:
 
     SessionData m_session;
     QString m_localPath;
+    QString m_storageStatus;
+    std::shared_ptr<std::atomic<quint64>> m_localRequest = std::make_shared<std::atomic<quint64>>(0);
     QString m_remotePath;
     QString m_remoteHome;
     QString m_pendingRemotePath;

@@ -80,9 +80,11 @@ private slots:
 
 private:
     void setBusy(bool busy);
+    void dispatch(std::function<void(FileSystemWorker *)> operation);
 
     QThread m_thread;
     FileSystemWorker *m_worker = nullptr;
+    quint64 m_generation = 0;
     SessionData m_session;
     QString m_home;
     QString m_currentPath;

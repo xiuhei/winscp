@@ -780,6 +780,11 @@ void MainWindow::onFileRead(const QString &path, const QByteArray &data)
 
 void MainWindow::showTextEditor(const QString &path, const QByteArray &data, bool readOnly)
 {
+    if (data.size() > MaxEditorBytes) {
+        QMessageBox::information(this, QStringLiteral("文件过大"),
+                                 QStringLiteral("内置编辑器支持不超过 32 MB 的文本。"));
+        return;
+    }
     if (data.contains('\0')) {
         QMessageBox::information(this, QStringLiteral("无法编辑"),
                                  QStringLiteral("该文件看起来是二进制文件，无法使用内置编辑器打开。"));

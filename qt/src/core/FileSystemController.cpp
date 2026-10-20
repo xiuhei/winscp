@@ -8,6 +8,8 @@
 #include <QMetaObject>
 #include <QEventLoop>
 #include <QTimer>
+#include <QPointer>
+#include <deque>
 
 #include <algorithm>
 #include <functional>
@@ -23,9 +25,35 @@ public:
     {
         m_keepAlive->setInterval(30000);
         connect(m_keepAlive, &QTimer::timeout, this, [this] {
-            if (m_backend && m_backend->isConnected())
+            if (!m_running && m_backend) {
                 m_backend->keepAlive();
+                if (!m_backend->isConnected()) {
+                    m_keepAlive->stop();
+                    stopBackend();
+                    emit disconnected(m_generation, QStringLiteral("服务器连接已断开，请重新连接。"));
+                }
+            }
         });
+    }
+
+    void enqueue(quint64 generation, std::function<void()> operation)
+    {
+        m_latestGeneration = std::max(m_latestGeneration, generation);
+        m_operations.emplace_back(generation, std::move(operation));
+        if (m_running)
+            return;
+        m_running = true;
+        while (!m_operations.empty()) {
+            auto [id, next] = std::move(m_operations.front());
+            m_operations.pop_front();
+            if (id != m_latestGeneration)
+                continue;
+            m_generation = id;
+            emit busyChanged(m_generation, true);
+            next();
+        }
+        m_running = false;
+        emit busyChanged(m_generation, false);
     }
 
     void setHostKeyPrompt(HostKeyPrompt prompt) { m_prompt = std::move(prompt); }
@@ -35,12 +63,12 @@ public:
         stopBackend();
         m_session = session;
         if (session.protocol == Protocol::Local) {
-            emit connectFailed(QStringLiteral("无法为本地会话创建远程连接。"));
+            emit connectFailed(m_generation, QStringLiteral("无法为本地会话创建远程连接。"));
             return;
         }
         m_backend = createBackend(session.protocol);
         if (!m_backend) {
-            emit connectFailed(QStringLiteral("暂不支持协议：%1")
+            emit connectFailed(m_generation, QStringLiteral("暂不支持协议：%1")
                                    .arg(protocolDisplayName(session.protocol)));
             return;
         }
@@ -48,7 +76,11 @@ public:
         QString error;
         if (!m_backend->connect(session, &error)) {
             m_backend.reset();
-            emit connectFailed(error.isEmpty() ? QStringLiteral("连接失败。") : error);
+            emit connectFailed(m_generation, error.isEmpty() ? QStringLiteral("连接失败。") : error);
+            return;
+        }
+        if (m_generation != m_latestGeneration) {
+            stopBackend();
             return;
         }
         m_home = path::normalizeRemote(m_backend->homePath());
@@ -59,7 +91,7 @@ public:
             m_keepAlive->setInterval(std::max(5, session.keepAliveSeconds) * 1000);
             m_keepAlive->start();
         }
-        emit connected(session, m_home, m_currentPath);
+        emit connected(m_generation, session, m_home, m_currentPath);
         if (!doList(m_currentPath) && m_currentPath != m_home)
             doList(m_home);
     }
@@ -68,7 +100,7 @@ public:
     {
         m_keepAlive->stop();
         stopBackend();
-        emit disconnected(QStringLiteral("会话已断开。"));
+        emit disconnected(m_generation, QStringLiteral("会话已断开。"));
     }
 
     void shutdown()
@@ -86,7 +118,7 @@ public:
     void listDirectory(const QString &path)
     {
         if (!m_backend || !m_backend->isConnected()) {
-            emit directoryFailed(path, QStringLiteral("当前没有活动的远程连接。"));
+            emit directoryFailed(m_generation, path, QStringLiteral("当前没有活动的远程连接。"));
             return;
         }
         doList(path);
@@ -98,7 +130,7 @@ public:
             return;
         QString error;
         const bool ok = m_backend->mkdir(path, &error);
-        emit operationFinished(QStringLiteral("新建文件夹"), ok,
+        emit operationFinished(m_generation, QStringLiteral("新建文件夹"), ok,
                                ok ? QStringLiteral("已创建文件夹：%1").arg(path) : error);
         if (ok)
             doList(m_currentPath);
@@ -130,7 +162,7 @@ public:
                           .arg(failed)
                           .arg(errors.join(QLatin1Char('\n')));
         }
-        emit operationFinished(QStringLiteral("删除"), ok, message);
+        emit operationFinished(m_generation, QStringLiteral("删除"), ok, message);
         if (failed < entries.size())
             doList(m_currentPath);
     }
@@ -141,7 +173,7 @@ public:
             return;
         QString error;
         const bool ok = m_backend->rename(from, to, &error);
-        emit operationFinished(QStringLiteral("重命名"), ok,
+        emit operationFinished(m_generation, QStringLiteral("重命名"), ok,
                                ok ? QStringLiteral("已重命名为：%1").arg(path::remoteName(to)) : error);
         if (ok)
             doList(m_currentPath);
@@ -153,7 +185,7 @@ public:
             return;
         QString error;
         const bool ok = m_backend->chmod(path, mode, &error);
-        emit operationFinished(QStringLiteral("修改权限"), ok,
+        emit operationFinished(m_generation, QStringLiteral("修改权限"), ok,
                                ok ? QStringLiteral("权限已更新：%1").arg(path) : error);
         if (ok)
             doList(m_currentPath);
@@ -167,7 +199,7 @@ public:
             error = QStringLiteral("连接已断开。");
         else if (!m_backend->stat(path, &info, &error) && error.isEmpty())
             error = QStringLiteral("无法读取文件属性。");
-        emit fileStated(requestId, m_session, path, info, error);
+        emit fileStated(m_generation, requestId, m_session, path, info, error);
     }
 
     void readFile(const QString &path)
@@ -177,10 +209,10 @@ public:
         QByteArray data;
         QString error;
         if (!m_backend->readFile(path, &data, &error)) {
-            emit operationFinished(QStringLiteral("读取文件"), false, error);
+            emit operationFinished(m_generation, QStringLiteral("读取文件"), false, error);
             return;
         }
-        emit fileRead(path, data);
+        emit fileRead(m_generation, path, data);
     }
 
     void writeFile(const QString &path, const QByteArray &data)
@@ -189,7 +221,7 @@ public:
             return;
         QString error;
         const bool ok = m_backend->writeFile(path, data, &error);
-        emit fileWriteFinished(path, ok,
+        emit fileWriteFinished(m_generation, path, ok,
                                ok ? QStringLiteral("已保存：%1").arg(path) : error);
         if (ok)
             doList(m_currentPath);
@@ -201,37 +233,39 @@ public:
             return;
         QString error;
         const bool ok = m_backend->createSymlink(target, linkPath, &error);
-        emit symlinkCreated(linkPath, ok,
+        emit symlinkCreated(m_generation, linkPath, ok,
                             ok ? QStringLiteral("已创建符号链接：%1").arg(linkPath) : error);
         if (ok)
             doList(m_currentPath);
     }
 
 signals:
-    void connected(const SessionData &session, const QString &home, const QString &initialPath);
-    void connectFailed(const QString &message);
-    void disconnected(const QString &reason);
-    void directoryLoading(const QString &path);
-    void directoryListed(const QString &path, const QList<FileInfo> &entries);
-    void directoryFailed(const QString &path, const QString &message);
-    void operationFinished(const QString &action, bool success, const QString &message);
-    void fileRead(const QString &path, const QByteArray &data);
-    void fileStated(quint64 requestId, const wsc::SessionData &session, const QString &path, const wsc::FileInfo &info, const QString &error);
-    void fileWriteFinished(const QString &path, bool success, const QString &message);
-    void symlinkCreated(const QString &linkPath, bool success, const QString &message);
+    void busyChanged(quint64 generation, bool busy);
+    void connected(quint64 generation, const SessionData &session, const QString &home, const QString &initialPath);
+    void connectFailed(quint64 generation, const QString &message);
+    void disconnected(quint64 generation, const QString &reason);
+    void directoryLoading(quint64 generation, const QString &path);
+    void directoryListed(quint64 generation, const QString &path, const QList<FileInfo> &entries);
+    void directoryFailed(quint64 generation, const QString &path, const QString &message);
+    void operationFinished(quint64 generation, const QString &action, bool success, const QString &message);
+    void fileRead(quint64 generation, const QString &path, const QByteArray &data);
+    void fileStated(quint64 generation, quint64 requestId, const wsc::SessionData &session, const QString &path, const wsc::FileInfo &info, const QString &error);
+    void fileWriteFinished(quint64 generation, const QString &path, bool success, const QString &message);
+    void symlinkCreated(quint64 generation, const QString &linkPath, bool success, const QString &message);
 
 private:
     bool ensureBackend()
     {
         if (m_backend && m_backend->isConnected())
             return true;
-        emit operationFinished(QStringLiteral("操作"), false,
+        emit operationFinished(m_generation, QStringLiteral("操作"), false,
                                QStringLiteral("当前没有活动的远程连接。"));
         return false;
     }
 
     void stopBackend()
     {
+        m_keepAlive->stop();
         for (auto *shell : findChildren<SshShellSession *>(QString(), Qt::FindDirectChildrenOnly))
             shell->stop();
         if (m_backend) {
@@ -243,15 +277,15 @@ private:
     bool doList(const QString &pathValue)
     {
         if (!m_backend || !m_backend->isConnected()) {
-            emit directoryFailed(pathValue, QStringLiteral("当前没有活动的远程连接。"));
+            emit directoryFailed(m_generation, pathValue, QStringLiteral("当前没有活动的远程连接。"));
             return false;
         }
         const QString path = path::normalizeRemote(pathValue);
-        emit directoryLoading(path);
+        emit directoryLoading(m_generation, path);
         FileList entries;
         QString error;
         if (!m_backend->list(path, &entries, &error)) {
-            emit directoryFailed(path, error);
+            emit directoryFailed(m_generation, path, error);
             return false;
         }
         m_currentPath = path;
@@ -260,10 +294,14 @@ private:
                 return left.isDir;
             return QString::localeAwareCompare(left.name, right.name) < 0;
         });
-        emit directoryListed(path, entries);
+        emit directoryListed(m_generation, path, entries);
         return true;
     }
 
+    std::deque<std::pair<quint64, std::function<void()>>> m_operations;
+    bool m_running = false;
+    quint64 m_generation = 0;
+    quint64 m_latestGeneration = 0;
     BackendPtr m_backend;
     SessionData m_session;
     HostKeyPrompt m_prompt;
@@ -280,28 +318,67 @@ FileSystemController::FileSystemController(QObject *parent)
     qRegisterMetaType<SessionData>("wsc::SessionData");
     m_worker = new FileSystemWorker();
     m_worker->moveToThread(&m_thread);
-    connect(&m_thread, &QThread::finished, m_worker, &QObject::deleteLater);    connect(m_worker, &FileSystemWorker::connected, this, &FileSystemController::onConnected,
-            Qt::QueuedConnection);
+    connect(&m_thread, &QThread::finished, m_worker, &QObject::deleteLater);
+    connect(m_worker, &FileSystemWorker::busyChanged, this,
+            [this](quint64 generation, bool busy) {
+                if (generation == m_generation)
+                    setBusy(busy);
+            }, Qt::QueuedConnection);
+    connect(m_worker, &FileSystemWorker::connected, this,
+            [this](quint64 generation, const SessionData &session, const QString &home, const QString &initialPath) {
+                if (generation == m_generation)
+                    onConnected(session, home, initialPath);
+            }, Qt::QueuedConnection);
     connect(m_worker, &FileSystemWorker::connectFailed, this,
-            &FileSystemController::onConnectFailed, Qt::QueuedConnection);
+            [this](quint64 generation, const QString &message) {
+                if (generation == m_generation)
+                    onConnectFailed(message);
+            }, Qt::QueuedConnection);
     connect(m_worker, &FileSystemWorker::disconnected, this,
-            &FileSystemController::onDisconnected, Qt::QueuedConnection);
+            [this](quint64 generation, const QString &reason) {
+                if (generation == m_generation)
+                    onDisconnected(reason);
+            }, Qt::QueuedConnection);
     connect(m_worker, &FileSystemWorker::directoryLoading, this,
-            &FileSystemController::onDirectoryLoading, Qt::QueuedConnection);
+            [this](quint64 generation, const QString &path) {
+                if (generation == m_generation)
+                    onDirectoryLoading(path);
+            }, Qt::QueuedConnection);
     connect(m_worker, &FileSystemWorker::directoryListed, this,
-            &FileSystemController::onDirectoryListed, Qt::QueuedConnection);
+            [this](quint64 generation, const QString &path, const QList<FileInfo> &entries) {
+                if (generation == m_generation)
+                    onDirectoryListed(path, entries);
+            }, Qt::QueuedConnection);
     connect(m_worker, &FileSystemWorker::directoryFailed, this,
-            &FileSystemController::onDirectoryFailed, Qt::QueuedConnection);
+            [this](quint64 generation, const QString &path, const QString &message) {
+                if (generation == m_generation)
+                    onDirectoryFailed(path, message);
+            }, Qt::QueuedConnection);
     connect(m_worker, &FileSystemWorker::operationFinished, this,
-            &FileSystemController::onOperationFinished, Qt::QueuedConnection);
-    connect(m_worker, &FileSystemWorker::fileRead, this, &FileSystemController::onFileRead,
-            Qt::QueuedConnection);
+            [this](quint64 generation, const QString &action, bool success, const QString &message) {
+                if (generation == m_generation)
+                    onOperationFinished(action, success, message);
+            }, Qt::QueuedConnection);
+    connect(m_worker, &FileSystemWorker::fileRead, this,
+            [this](quint64 generation, const QString &path, const QByteArray &data) {
+                if (generation == m_generation)
+                    onFileRead(path, data);
+            }, Qt::QueuedConnection);
+    connect(m_worker, &FileSystemWorker::fileStated, this,
+            [this](quint64 generation, quint64 requestId, const wsc::SessionData &session, const QString &path, const wsc::FileInfo &info, const QString &error) {
+                if (generation == m_generation)
+                    fileStated(requestId, session, path, info, error);
+            }, Qt::QueuedConnection);
     connect(m_worker, &FileSystemWorker::fileWriteFinished, this,
-            &FileSystemController::onFileWriteFinished, Qt::QueuedConnection);
+            [this](quint64 generation, const QString &path, bool success, const QString &message) {
+                if (generation == m_generation)
+                    onFileWriteFinished(path, success, message);
+            }, Qt::QueuedConnection);
     connect(m_worker, &FileSystemWorker::symlinkCreated, this,
-            &FileSystemController::onSymlinkCreated, Qt::QueuedConnection);
-    connect(m_worker, &FileSystemWorker::fileStated, this, &FileSystemController::fileStated,
-            Qt::QueuedConnection);
+            [this](quint64 generation, const QString &linkPath, bool success, const QString &message) {
+                if (generation == m_generation)
+                    onSymlinkCreated(linkPath, success, message);
+            }, Qt::QueuedConnection);
     m_thread.setObjectName(QStringLiteral("RemoteFileSystem"));
     m_thread.start();
 }
@@ -322,8 +399,10 @@ SshShellSession *FileSystemController::createShell(int columns, int rows, const 
 
 void FileSystemController::startShell(SshShellSession *shell)
 {
-    QMetaObject::invokeMethod(m_worker, [worker = m_worker, shell] { worker->startShell(shell); },
-                              Qt::QueuedConnection);
+    dispatch([shell = QPointer<SshShellSession>(shell)](FileSystemWorker *worker) {
+        if (shell)
+            worker->startShell(shell);
+    });
 }
 
 void FileSystemController::setHostKeyPrompt(HostKeyPrompt prompt)
@@ -335,24 +414,23 @@ void FileSystemController::setHostKeyPrompt(HostKeyPrompt prompt)
 
 void FileSystemController::connectToHost(const SessionData &session)
 {
-    if (m_connecting)
-        return;
+    ++m_generation;
     m_connecting = true;
     m_connected = false;
     m_busy = true;
     emit connecting(session);
     emit busyChanged(true);
-    QMetaObject::invokeMethod(
-        m_worker, [worker = m_worker, session]() { worker->connectToHost(session); },
-        Qt::QueuedConnection);
+    dispatch([session](FileSystemWorker *worker) { worker->connectToHost(session); });
 }
 
 void FileSystemController::disconnectFromHost()
 {
     if (!m_worker)
         return;
-    QMetaObject::invokeMethod(m_worker, [worker = m_worker]() { worker->disconnectFromHost(); },
-                              Qt::QueuedConnection);
+    ++m_generation;
+    m_connected = false;
+    m_connecting = false;
+    dispatch([](FileSystemWorker *worker) { worker->disconnectFromHost(); });
 }
 
 void FileSystemController::shutdown()
@@ -361,17 +439,17 @@ void FileSystemController::shutdown()
         return;
     QEventLoop loop;
     // A connection can be awaiting a host-key decision on the UI thread.
-    QMetaObject::invokeMethod(m_worker, [worker = m_worker, &loop] {
+    ++m_generation;
+    dispatch([&loop](FileSystemWorker *worker) {
         worker->shutdown();
         QMetaObject::invokeMethod(&loop, &QEventLoop::quit, Qt::QueuedConnection);
-    }, Qt::QueuedConnection);
+    });
     loop.exec(QEventLoop::ExcludeUserInputEvents);
 }
 
 void FileSystemController::listDirectory(const QString &path)
 {
-    QMetaObject::invokeMethod(m_worker, [worker = m_worker, path]() { worker->listDirectory(path); },
-                              Qt::QueuedConnection);
+    dispatch([path](FileSystemWorker *worker) { worker->listDirectory(path); });
 }
 
 void FileSystemController::refresh()
@@ -382,54 +460,50 @@ void FileSystemController::refresh()
 
 void FileSystemController::createDirectory(const QString &path)
 {
-    QMetaObject::invokeMethod(m_worker, [worker = m_worker, path]() { worker->createDirectory(path); },
-                              Qt::QueuedConnection);
+    dispatch([path](FileSystemWorker *worker) { worker->createDirectory(path); });
 }
 
 void FileSystemController::deleteEntries(const QList<FileInfo> &entries)
 {
-    QMetaObject::invokeMethod(
-        m_worker, [worker = m_worker, entries]() { worker->deleteEntries(entries); },
-        Qt::QueuedConnection);
+    dispatch([entries](FileSystemWorker *worker) { worker->deleteEntries(entries); });
 }
 
 void FileSystemController::renameEntry(const QString &from, const QString &to)
 {
-    QMetaObject::invokeMethod(
-        m_worker, [worker = m_worker, from, to]() { worker->renameEntry(from, to); },
-        Qt::QueuedConnection);
+    dispatch([from, to](FileSystemWorker *worker) { worker->renameEntry(from, to); });
 }
 
 void FileSystemController::setPermissions(const QString &path, quint32 mode)
 {
-    QMetaObject::invokeMethod(
-        m_worker, [worker = m_worker, path, mode]() { worker->setPermissions(path, mode); },
-        Qt::QueuedConnection);
+    dispatch([path, mode](FileSystemWorker *worker) { worker->setPermissions(path, mode); });
 }
 
 void FileSystemController::statFile(const QString &path, quint64 requestId)
 {
-    QMetaObject::invokeMethod(m_worker, [this, path, requestId] { m_worker->statFile(path, requestId); }, Qt::QueuedConnection);
+    dispatch([path, requestId](FileSystemWorker *worker) { worker->statFile(path, requestId); });
 }
 
 void FileSystemController::readFile(const QString &path)
 {
-    QMetaObject::invokeMethod(m_worker, [worker = m_worker, path]() { worker->readFile(path); },
-                              Qt::QueuedConnection);
+    dispatch([path](FileSystemWorker *worker) { worker->readFile(path); });
 }
 
 void FileSystemController::writeFile(const QString &path, const QByteArray &data)
 {
-    QMetaObject::invokeMethod(
-        m_worker, [worker = m_worker, path, data]() { worker->writeFile(path, data); },
-        Qt::QueuedConnection);
+    dispatch([path, data](FileSystemWorker *worker) { worker->writeFile(path, data); });
 }
 
 void FileSystemController::createSymlink(const QString &target, const QString &linkPath)
 {
-    QMetaObject::invokeMethod(
-        m_worker, [worker = m_worker, target, linkPath]() { worker->createSymlink(target, linkPath); },
-        Qt::QueuedConnection);
+    dispatch([target, linkPath](FileSystemWorker *worker) { worker->createSymlink(target, linkPath); });
+}
+
+void FileSystemController::dispatch(std::function<void(FileSystemWorker *)> operation)
+{
+    const quint64 generation = m_generation;
+    QMetaObject::invokeMethod(m_worker, [worker = m_worker, generation, operation = std::move(operation)] {
+        worker->enqueue(generation, [worker, operation] { operation(worker); });
+    }, Qt::QueuedConnection);
 }
 
 void FileSystemController::setBusy(bool busy)

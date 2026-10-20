@@ -109,6 +109,7 @@ private:
         Csi,
         CsiIgnore,
         Osc,
+        OscIgnore,
         Dcs,
     };
 

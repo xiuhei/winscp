@@ -91,6 +91,24 @@ QList<DavItem> parseResponses(const QByteArray &xml)
 
 } // namespace
 
+WebDavBackend::WebDavBackend() = default;
+WebDavBackend::~WebDavBackend() = default;
+
+void WebDavBackend::disconnect()
+{
+    m_connected = false;
+    m_network.reset();
+}
+
+QNetworkAccessManager *WebDavBackend::networkManager()
+{
+    if (!m_network) {
+        m_network = std::make_unique<QNetworkAccessManager>();
+        attachAuthentication(m_network.get());
+    }
+    return m_network.get();
+}
+
 void WebDavBackend::applySslConfiguration(QNetworkRequest *request) const
 {
     if (!request)
@@ -174,8 +192,7 @@ WebDavBackend::HttpResult WebDavBackend::request(const QByteArray &verb, const Q
 {
     Q_UNUSED(allowStatusCodes);
     HttpResult result;
-    QNetworkAccessManager manager;
-    attachAuthentication(&manager);
+    auto *manager = networkManager();
     QNetworkRequest networkRequest(urlForPath(path));
     networkRequest.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                                QNetworkRequest::NoLessSafeRedirectPolicy);
@@ -191,13 +208,13 @@ WebDavBackend::HttpResult WebDavBackend::request(const QByteArray &verb, const Q
 
     QNetworkReply *reply = nullptr;
     if (verb == "GET")
-        reply = manager.get(networkRequest);
+        reply = manager->get(networkRequest);
     else if (verb == "DELETE")
-        reply = manager.deleteResource(networkRequest);
+        reply = manager->deleteResource(networkRequest);
     else if (verb == "PUT")
-        reply = manager.put(networkRequest, body);
+        reply = manager->put(networkRequest, body);
     else
-        reply = manager.sendCustomRequest(networkRequest, verb, body);
+        reply = manager->sendCustomRequest(networkRequest, verb, body);
 
     QObject::connect(reply, &QNetworkReply::sslErrors, reply,
                      [this, reply](const QList<QSslError> &errors) {
@@ -226,13 +243,15 @@ WebDavBackend::HttpResult WebDavBackend::request(const QByteArray &verb, const Q
     result.body = reply->readAll();
     if (reply->error() != QNetworkReply::NoError) {
         result.error = reply->errorString();
-        if (result.status == 0)
+        if (result.status == 0 || result.status < 400) {
+            result.status = 0;
             Logger::instance().warning(QStringLiteral("WebDAV 请求失败：%1").arg(result.error));
+        }
     }
     const QByteArray reason = reply->attribute(QNetworkRequest::HttpReasonPhraseAttribute).toByteArray();
     if (!reason.isEmpty() && result.error.isEmpty() && result.status >= 400)
         result.error = QString::fromUtf8(reason);
-    reply->deleteLater();
+    delete reply;
     return result;
 }
 
@@ -465,12 +484,12 @@ bool WebDavBackend::readFile(const QString &pathValue, QByteArray *data, QString
     const QString tempPath = QDir(AppPaths::tempDir())
                                  .filePath(QStringLiteral("dav-read-%1.tmp")
                                                .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
-    if (!downloadFile(pathValue, tempPath, -1, nullptr, nullptr, error))
+    if (!download(pathValue, tempPath, -1, nullptr, nullptr, error, MaxEditorBytes))
         return false;
     QFile file(tempPath);
     const bool opened = file.open(QIODevice::ReadOnly);
     if (opened)
-        *data = file.readAll();
+        *data = file.read(MaxEditorBytes + 1);
     else if (error)
         *error = QStringLiteral("无法读取临时文件：%1").arg(file.errorString());
     file.close();
@@ -501,14 +520,21 @@ bool WebDavBackend::downloadFile(const QString &remotePath, const QString &local
                                  const ProgressCallback &progress, CancelToken *cancel,
                                  QString *error)
 {
+    return download(remotePath, localPath, totalHint, progress, cancel, error, -1);
+}
+
+bool WebDavBackend::download(const QString &remotePath, const QString &localPath, qint64 totalHint,
+                             const ProgressCallback &progress, CancelToken *cancel,
+                             QString *error, qint64 maxBytes)
+{
     const QString remote = path::normalizeRemote(remotePath);
-    QNetworkAccessManager manager;
-    attachAuthentication(&manager);
+    auto *manager = networkManager();
     QNetworkRequest request(urlForPath(remote));
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::NoLessSafeRedirectPolicy);
     applySslConfiguration(&request);
-    QNetworkReply *reply = manager.get(request);
+    QNetworkReply *reply = manager->get(request);
+    reply->setReadBufferSize(256 * 1024);
     QObject::connect(reply, &QNetworkReply::sslErrors, reply, [this, reply](const QList<QSslError> &errors) {
         Q_UNUSED(errors);
         if (!m_verifyTls)
@@ -527,11 +553,14 @@ bool WebDavBackend::downloadFile(const QString &remotePath, const QString &local
     }
 
     bool writeFailed = false;
+    bool tooLarge = false;
     bool cancelled = false;
     QEventLoop loop;
+    bool timedOut = false;
     QTimer inactivity;
     inactivity.setSingleShot(true);
     QObject::connect(&inactivity, &QTimer::timeout, &loop, [&] {
+        timedOut = true;
         reply->abort();
         loop.quit();
     });
@@ -547,6 +576,12 @@ bool WebDavBackend::downloadFile(const QString &remotePath, const QString &local
     QObject::connect(reply, &QNetworkReply::readyRead, &loop, [&] {
         const QByteArray chunk = reply->readAll();
         if (!chunk.isEmpty()) {
+            if (maxBytes >= 0 && output.pos() + chunk.size() > maxBytes) {
+                tooLarge = true;
+                reply->abort();
+                loop.quit();
+                return;
+            }
             if (output.write(chunk) != chunk.size()) {
                 writeFailed = true;
                 reply->abort();
@@ -574,23 +609,30 @@ bool WebDavBackend::downloadFile(const QString &remotePath, const QString &local
     if (!cancelled && !writeFailed && reply->error() == QNetworkReply::NoError) {
         // Flush any remaining data.
         const QByteArray tail = reply->readAll();
-        if (!tail.isEmpty())
-            output.write(tail);
+        if (!tail.isEmpty()) {
+            tooLarge = maxBytes >= 0 && output.pos() + tail.size() > maxBytes;
+            if (!tooLarge && output.write(tail) != tail.size())
+                writeFailed = true;
+        }
     }
-    const bool networkOk = (status >= 200 && status < 300) && !cancelled && !writeFailed &&
-                           (reply->error() == QNetworkReply::NoError ||
-                            reply->error() == QNetworkReply::OperationCanceledError);
-    reply->deleteLater();
+    const qint64 expected = reply->header(QNetworkRequest::ContentLengthHeader).toLongLong();
+    const bool complete = !reply->hasRawHeader("Content-Length") || output.pos() == expected;
+    const bool networkOk = status >= 200 && status < 300 && !cancelled && !writeFailed &&
+                           !timedOut && !tooLarge && complete &&
+                           reply->error() == QNetworkReply::NoError;
+    delete reply;
     if (cancelled) {
         output.cancelWriting();
         if (error)
             *error = QStringLiteral("传输已取消。");
         return false;
     }
-    if (writeFailed) {
+    if (tooLarge || timedOut || writeFailed) {
         output.cancelWriting();
         if (error)
-            *error = QStringLiteral("写入本地文件失败。");
+            *error = tooLarge ? QStringLiteral("文件超过编辑器的 32 MB 限制。")
+                              : timedOut ? QStringLiteral("下载超时。")
+                                         : QStringLiteral("写入本地文件失败。");
         return false;
     }
     if (!networkOk) {
@@ -624,13 +666,12 @@ bool WebDavBackend::uploadFile(const QString &localPath, const QString &remotePa
         return false;
     }
     const QString remote = path::normalizeRemote(remotePath);
-    QNetworkAccessManager manager;
-    attachAuthentication(&manager);
+    auto *manager = networkManager();
     QNetworkRequest request(urlForPath(remote));
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::NoLessSafeRedirectPolicy);
     applySslConfiguration(&request);
-    QNetworkReply *reply = manager.put(request, &input);
+    QNetworkReply *reply = manager->put(request, &input);
     QObject::connect(reply, &QNetworkReply::sslErrors, reply, [this, reply](const QList<QSslError> &errors) {
         Q_UNUSED(errors);
         if (!m_verifyTls)
@@ -639,9 +680,11 @@ bool WebDavBackend::uploadFile(const QString &localPath, const QString &remotePa
 
     bool cancelled = false;
     QEventLoop loop;
+    bool timedOut = false;
     QTimer inactivity;
     inactivity.setSingleShot(true);
     QObject::connect(&inactivity, &QTimer::timeout, &loop, [&] {
+        timedOut = true;
         reply->abort();
         loop.quit();
     });
@@ -669,10 +712,9 @@ bool WebDavBackend::uploadFile(const QString &localPath, const QString &remotePa
 
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     const QString networkError = reply->errorString();
-    const bool networkOk = status >= 200 && status < 300 && !cancelled &&
-                           (reply->error() == QNetworkReply::NoError ||
-                            reply->error() == QNetworkReply::OperationCanceledError);
-    reply->deleteLater();
+    const bool networkOk = status >= 200 && status < 300 && !cancelled && !timedOut &&
+                           reply->error() == QNetworkReply::NoError;
+    delete reply;
     if (cancelled) {
         if (error)
             *error = QStringLiteral("传输已取消。");

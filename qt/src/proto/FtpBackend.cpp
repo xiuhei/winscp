@@ -1192,22 +1192,21 @@ bool FtpBackend::readFile(const QString &pathValue, QByteArray *data, QString *e
 {
     if (!data)
         return false;
-    AppPaths::ensureDirectories();
-    const QString tempPath = QDir(AppPaths::tempDir())
-                                 .filePath(QStringLiteral("ftp-read-%1.tmp")
-                                               .arg(QDateTime::currentMSecsSinceEpoch()));
-    if (!downloadFile(pathValue, tempPath, -1, nullptr, nullptr, error))
-        return false;
-    QFile file(tempPath);
-    const bool ok = file.open(QIODevice::ReadOnly);
+    data->clear();
+    bool tooLarge = false;
+    const bool ok = retrToSink(pathValue, [&](const char *chunk, qint64 size) {
+        if (data->size() + size > MaxEditorBytes) {
+            tooLarge = true;
+            return false;
+        }
+        data->append(chunk, size);
+        return true;
+    }, -1, {}, nullptr, error);
     if (!ok) {
-        if (error)
-            *error = QStringLiteral("无法读取临时文件：%1").arg(file.errorString());
-    } else {
-        *data = file.readAll();
-        file.close();
+        data->clear();
+        if (tooLarge && error)
+            *error = QStringLiteral("文件超过编辑器的 32 MB 限制。");
     }
-    QFile::remove(tempPath);
     return ok;
 }
 

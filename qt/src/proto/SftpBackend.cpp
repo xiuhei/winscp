@@ -9,6 +9,9 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
+#include <QTemporaryFile>
+#include <QScopeGuard>
+#include <QUuid>
 #include <QTimeZone>
 
 #include <libssh2.h>
@@ -518,7 +521,7 @@ bool SftpBackend::readFile(const QString &pathValue, QByteArray *data, QString *
         (attributes.flags & LIBSSH2_SFTP_ATTR_SIZE)) {
         size = static_cast<qint64>(attributes.filesize);
     }
-    constexpr qint64 kMaxEditor = 32 * 1024 * 1024;
+    constexpr qint64 kMaxEditor = MaxEditorBytes;
     if (size > kMaxEditor) {
         libssh2_sftp_close(handle);
         if (error)
@@ -555,34 +558,14 @@ bool SftpBackend::readFile(const QString &pathValue, QByteArray *data, QString *
 
 bool SftpBackend::writeFile(const QString &pathValue, const QByteArray &data, QString *error)
 {
-    const QString normalized = path::normalizeRemote(pathValue);
-    const QByteArray encoded = remoteBytes(normalized);
-    LIBSSH2_SFTP_HANDLE *handle = libssh2_sftp_open_ex(
-        static_cast<LIBSSH2_SFTP *>(m_sftp), encoded.constData(),
-        static_cast<unsigned int>(encoded.size()),
-        LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC, 0644, LIBSSH2_SFTP_OPENFILE);
-    if (!handle) {
+    QTemporaryFile input;
+    if (!input.open() || input.write(data) != data.size() || !input.flush()) {
         if (error)
-            *error = sftpError(QStringLiteral("无法创建文件 %1。").arg(normalized));
+            *error = QStringLiteral("无法创建待上传的临时文件：%1").arg(input.errorString());
         return false;
     }
-    qint64 offset = 0;
-    bool ok = true;
-    while (offset < data.size()) {
-        const ssize_t written = libssh2_sftp_write(handle, data.constData() + offset,
-                                                   static_cast<size_t>(data.size() - offset));
-        if (written < 0) {
-            if (error)
-                *error = sftpError(QStringLiteral("写入文件 %1 失败。").arg(normalized));
-            ok = false;
-            break;
-        }
-        offset += written;
-    }
-    libssh2_sftp_close(handle);
-    if (error && ok)
-        error->clear();
-    return ok;
+    input.close();
+    return uploadFile(input.fileName(), pathValue, {}, nullptr, error);
 }
 
 bool SftpBackend::downloadFile(const QString &remotePath, const QString &localPath, qint64 totalHint,
@@ -678,17 +661,40 @@ bool SftpBackend::uploadFile(const QString &localPath, const QString &remotePath
                          .arg(QDir::toNativeSeparators(localPath), input.errorString());
         return false;
     }
-    const QString remote = path::normalizeRemote(remotePath);
-    const QByteArray encoded = remoteBytes(remote);
+    QString remote = path::normalizeRemote(remotePath);
+    const QByteArray originalBytes = remote.toUtf8();
+    char resolved[4096];
+    const int resolvedSize = libssh2_sftp_realpath(static_cast<LIBSSH2_SFTP *>(m_sftp),
+                                                  originalBytes.constData(), resolved, sizeof(resolved));
+    if (resolvedSize > 0)
+        remote = QString::fromUtf8(resolved, resolvedSize);
+    else {
+        LIBSSH2_SFTP_ATTRIBUTES link{};
+        if (libssh2_sftp_lstat(static_cast<LIBSSH2_SFTP *>(m_sftp), originalBytes.constData(), &link) == 0 &&
+            isSymlinkMode(link.permissions)) {
+            if (error)
+                *error = QStringLiteral("无法解析上传目标的符号链接。");
+            return false;
+        }
+    }
+    FileInfo existing;
+    const bool exists = stat(remote, &existing, nullptr);
+    const QString temporary = path::remoteJoin(path::remoteParent(remote),
+        QStringLiteral(".winscp-upload-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    const QByteArray encoded = temporary.toUtf8();
     LIBSSH2_SFTP_HANDLE *handle = libssh2_sftp_open_ex(
         static_cast<LIBSSH2_SFTP *>(m_sftp), encoded.constData(),
         static_cast<unsigned int>(encoded.size()),
-        LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC, 0644, LIBSSH2_SFTP_OPENFILE);
+        LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_EXCL,
+        exists ? existing.mode & 0777 : 0644, LIBSSH2_SFTP_OPENFILE);
     if (!handle) {
         if (error)
-            *error = sftpError(QStringLiteral("无法创建远程文件 %1。").arg(remote));
+            *error = sftpError(QStringLiteral("无法创建临时上传文件。"));
         return false;
     }
+    auto cleanup = qScopeGuard([&] {
+        libssh2_sftp_unlink(static_cast<LIBSSH2_SFTP *>(m_sftp), encoded.constData());
+    });
 
     const qint64 total = input.size();
     qint64 done = 0;
@@ -703,13 +709,19 @@ bool SftpBackend::uploadFile(const QString &localPath, const QString &remotePath
             break;
         }
         const qint64 read = input.read(buffer.data(), buffer.size());
-        if (read <= 0)
+        if (read < 0) {
+            if (error)
+                *error = input.errorString();
+            ok = false;
+            break;
+        }
+        if (read == 0)
             break;
         qint64 offset = 0;
         while (offset < read) {
             const ssize_t written = libssh2_sftp_write(handle, buffer.constData() + offset,
                                                        static_cast<size_t>(read - offset));
-            if (written < 0) {
+            if (written <= 0) {
                 if (error)
                     *error = sftpError(QStringLiteral("上传 %1 失败。").arg(remote));
                 ok = false;
@@ -723,12 +735,21 @@ bool SftpBackend::uploadFile(const QString &localPath, const QString &remotePath
         if (progress)
             progress(TransferProgress{done, total, QFileInfo(localPath).fileName()});
     }
-    libssh2_sftp_close(handle);
-    if (!ok) {
-        // Best effort cleanup of a partial upload.
-        libssh2_sftp_unlink(static_cast<LIBSSH2_SFTP *>(m_sftp), encoded.constData());
-        return false;
+    if (libssh2_sftp_close(handle) != 0) {
+        if (error)
+            *error = sftpError(QStringLiteral("无法完成远程文件写入。"));
+        ok = false;
     }
+    if (!ok || (cancel && cancel->load()))
+        return false;
+    if (exists && !chmod(temporary, existing.mode & 0777, error))
+        return false;
+    const QByteArray target = remote.toUtf8();
+    if (libssh2_sftp_posix_rename_ex(static_cast<LIBSSH2_SFTP *>(m_sftp), encoded.constData(),
+                                    encoded.size(), target.constData(), target.size()) != 0 &&
+        !rename(temporary, remote, error))
+        return false;
+    cleanup.dismiss();
     if (error)
         error->clear();
     return true;

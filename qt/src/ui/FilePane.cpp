@@ -17,6 +17,9 @@
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
+#include <QDirIterator>
+#include <QFutureWatcher>
+#include <QtConcurrentRun>
 #include <QDrag>
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -667,10 +670,6 @@ void FilePane::attachController(FileSystemController *controller)
                 if (!success)
                     emit statusMessage(QStringLiteral("%1失败：%2").arg(action, message));
             });
-    connect(controller, &FileSystemController::busyChanged, this, [this](bool busy) {
-        if (busy)
-            setLoading(true, QString());
-    });
 }
 
 void FilePane::setRemoteSession(const SessionData &session)
@@ -898,56 +897,75 @@ void FilePane::navigateLocal(const QString &pathValue)
     loadLocalDirectory(pathValue, true);
 }
 
-bool FilePane::loadLocalDirectory(const QString &pathValue, bool addToHistory)
+FilePane::~FilePane()
+{
+    ++*m_localRequest;
+}
+
+void FilePane::loadLocalDirectory(const QString &pathValue, bool addToHistory)
 {
     QString input = normalizedLocalInput(pathValue);
     if (input.isEmpty())
         input = QDir::homePath();
-    QFileInfo info(input);
-    if (info.exists() && info.isFile()) {
-        input = info.absolutePath();
-        info = QFileInfo(input);
-    }
-    if (!info.exists() || !info.isDir()) {
-        QMessageBox::warning(this, QStringLiteral("无法打开文件夹"),
-                             QStringLiteral("文件夹不存在：\n%1").arg(localDisplay(input)));
-        m_pathCombo->setEditText(localDisplay(m_localPath));
-        return false;
-    }
-    QDir directory(input);
-    if (!directory.isReadable()) {
-        QMessageBox::warning(this, QStringLiteral("无法打开文件夹"),
-                             QStringLiteral("没有权限读取：\n%1").arg(localDisplay(input)));
-        m_pathCombo->setEditText(localDisplay(m_localPath));
-        return false;
-    }
-
-    FileList entries;
-    const QFileInfoList fileInfos = directory.entryInfoList(
-        QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System,
-        QDir::DirsFirst | QDir::Name | QDir::IgnoreCase);
-    entries.reserve(fileInfos.size());
-    for (const QFileInfo &entry : fileInfos) {
-        FileInfo fileInfo = LocalBackend::infoForPath(entry.absoluteFilePath());
-        if (fileInfo.isValid())
-            entries.append(fileInfo);
-    }
-    m_localPath = QDir::cleanPath(input);
-    m_model->setEntries(withParent(entries, m_localPath, false));
-    m_table->clearSelection();
-    m_table->setCurrentIndex(QModelIndex());
-    m_stack->setCurrentIndex(0);
-    updateHeader();
-    updateCombo(localDisplay(m_localPath));
-    updateStatus();
-    updateEmptyState();
-    setLoading(false);
-    if (addToHistory)
-        addHistory(m_localPath);
-    updateNavigationButtons();
-    Settings::instance().lastLocalDirectory = m_localPath;
-    emit pathChanged(m_localPath, false);
-    return true;
+    const quint64 request = ++*m_localRequest;
+    const auto latest = m_localRequest;
+    setLoading(true, input);
+    struct Listing {
+        QString path;
+        QString error;
+        QString storage;
+        FileList entries;
+    };
+    auto *watcher = new QFutureWatcher<Listing>(this);
+    connect(watcher, &QFutureWatcher<Listing>::finished, this, [this, watcher, latest, request, addToHistory] {
+        const Listing result = watcher->result();
+        watcher->deleteLater();
+        if (latest->load() != request)
+            return;
+        if (!result.error.isEmpty()) {
+            setLoading(false);
+            m_pathCombo->setEditText(localDisplay(m_localPath));
+            emit statusMessage(result.error);
+            return;
+        }
+        m_localPath = result.path;
+        m_storageStatus = result.storage;
+        m_model->setEntries(withParent(result.entries, m_localPath, false));
+        m_table->clearSelection();
+        m_table->setCurrentIndex(QModelIndex());
+        m_stack->setCurrentIndex(0);
+        updateHeader();
+        updateCombo(localDisplay(m_localPath));
+        setLoading(false);
+        if (addToHistory)
+            addHistory(m_localPath);
+        updateNavigationButtons();
+        Settings::instance().lastLocalDirectory = m_localPath;
+        emit pathChanged(m_localPath, false);
+    });
+    watcher->setFuture(QtConcurrent::run([input, latest, request] {
+        Listing result;
+        QFileInfo info(input);
+        result.path = info.isFile() ? info.absolutePath() : QDir::cleanPath(info.absoluteFilePath());
+        QDir directory(result.path);
+        if (!directory.exists() || !directory.isReadable()) {
+            result.error = QStringLiteral("目录不存在或无法读取：%1").arg(localDisplay(result.path));
+            return result;
+        }
+        QDirIterator files(result.path, QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System);
+        while (files.hasNext()) {
+            if (latest->load() != request)
+                return Listing{};
+            const FileInfo entry = LocalBackend::infoForPath(files.next());
+            if (entry.isValid())
+                result.entries.append(entry);
+        }
+        const QStorageInfo storage(result.path);
+        if (storage.isValid())
+            result.storage = QStringLiteral(" · 可用 %1 / %2")
+                                 .arg(path::formatSize(storage.bytesAvailable()), path::formatSize(storage.bytesTotal()));
+        return result;
+    }));
 }
 
 void FilePane::navigateRemote(const QString &pathValue)
@@ -1227,14 +1245,8 @@ void FilePane::updateStatus()
             text += QStringLiteral(" · 显示 %1/%2").arg(visible).arg(total);
     }
 
-    if (!isRemote()) {
-        const QStorageInfo storage(m_localPath);
-        if (storage.isValid()) {
-            text += QStringLiteral(" · 可用 %1 / %2")
-                        .arg(path::formatSize(storage.bytesAvailable()),
-                             path::formatSize(storage.bytesTotal()));
-        }
-    }
+    if (!isRemote())
+        text += m_storageStatus;
     m_statusLabel->setText(text);
     m_statusLabel->setStyleSheet(QString());
     m_statusLabel->setToolTip(text);
@@ -1334,10 +1346,7 @@ void FilePane::goBack()
         setLoading(true, target);
         m_controller->listDirectory(target);
     } else {
-        const int targetIndex = m_historyIndex;
-        if (loadLocalDirectory(target, false)) {
-            m_historyIndex = targetIndex;
-        }
+        loadLocalDirectory(target, false);
     }
     updateNavigationButtons();
 }
@@ -1353,9 +1362,7 @@ void FilePane::goForward()
         setLoading(true, target);
         m_controller->listDirectory(target);
     } else {
-        const int targetIndex = m_historyIndex;
-        if (loadLocalDirectory(target, false))
-            m_historyIndex = targetIndex;
+        loadLocalDirectory(target, false);
     }
     updateNavigationButtons();
 }

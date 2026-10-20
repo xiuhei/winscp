@@ -5,6 +5,8 @@
 
 #include <memory>
 
+typedef struct _LIBSSH2_CHANNEL LIBSSH2_CHANNEL;
+
 namespace wsc {
 
 class SshConnection;
@@ -54,8 +56,12 @@ public:
 private:
     bool authenticate(const SessionData &session, QString *error);
     bool exec(const QString &command, QByteArray *output, QByteArray *errorOutput, int *exitCode,
-              QString *error);
-    bool execOk(const QString &command, QByteArray *output, QString *error);
+              QString *error, qint64 outputLimit = 64 * 1024 * 1024);
+    bool execOk(const QString &command, QByteArray *output, QString *error,
+                qint64 outputLimit = 64 * 1024 * 1024);
+    bool readChannel(LIBSSH2_CHANNEL *channel,
+                     const std::function<bool(const char *, qint64)> &sink,
+                     QByteArray *stderrData, CancelToken *cancel, QString *error);
     bool downloadStream(const QString &remotePath, const QString &localPath, qint64 totalHint,
                         const ProgressCallback &progress, CancelToken *cancel, QString *error);
     bool uploadStream(const QString &localPath, const QString &remotePath,

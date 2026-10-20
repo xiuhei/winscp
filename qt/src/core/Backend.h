@@ -14,6 +14,8 @@
 
 namespace wsc {
 
+inline constexpr qint64 MaxEditorBytes = 32 * 1024 * 1024;
+
 class SshConnection;
 
 struct TransferProgress {

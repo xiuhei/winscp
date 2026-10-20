@@ -19,7 +19,21 @@ private slots:
     void alternateScreen();
     void titleAndResponses();
     void wrapping();
+    void oversizedEscapeSequences();
 };
+
+void TerminalScreenTest::oversizedEscapeSequences()
+{
+    TerminalScreen screen(80, 24);
+    screen.feed(QStringLiteral("\x1b]0;") + QString(1024 * 1024, QLatin1Char('x')));
+    QVERIFY(screen.title().isEmpty());
+    screen.feed(QStringLiteral("\x07OK"));
+    QCOMPARE(screen.lineText(0), QStringLiteral("OK"));
+    screen.feed(QStringLiteral("\x1b[") + QString(1024 * 1024, QLatin1Char('1')) + QStringLiteral("m!"));
+    QCOMPARE(screen.lineText(0), QStringLiteral("OK!"));
+    screen.feed(QStringLiteral("\x1b]0;valid\x07"));
+    QCOMPARE(screen.title(), QStringLiteral("valid"));
+}
 
 void TerminalScreenTest::basicText()
 {

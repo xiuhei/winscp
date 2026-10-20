@@ -95,10 +95,22 @@ void SshShellSession::resizePty(int columns, int rows)
 void SshShellSession::stop()
 {
     if (QThread::currentThread() != thread()) {
-        QMetaObject::invokeMethod(this, [this] { stop(); }, Qt::BlockingQueuedConnection);
+        QMetaObject::invokeMethod(this, [this] { stop(); }, Qt::QueuedConnection);
         return;
     }
     close(-1, QStringLiteral("终端已关闭。"));
+}
+
+void SshShellSession::setOutputBackpressure(bool enabled)
+{
+    QMetaObject::invokeMethod(this, [this, enabled] { m_outputBackpressure = enabled; });
+}
+
+void SshShellSession::acknowledgeOutput(qsizetype bytes)
+{
+    QMetaObject::invokeMethod(this, [this, bytes] {
+        m_outputInFlight = std::max<qsizetype>(0, m_outputInFlight - bytes);
+    });
 }
 
 void SshShellSession::poll()
@@ -112,17 +124,25 @@ void SshShellSession::poll()
         NonBlockingSession nonBlocking(m_connection->session());
         char buffer[32768];
         // Bound each tick so file operations and other terminal tabs can run.
+        QByteArray output;
         for (int stream = 0; stream < 2 && error.isEmpty(); ++stream) {
-            for (int attempt = 0; attempt < 16; ++attempt) {
+            for (int attempt = 0; attempt < 2; ++attempt) {
+                if (m_outputBackpressure && m_outputInFlight + output.size() >= 256 * 1024)
+                    break;
                 const auto read = libssh2_channel_read_ex(m_channel, stream, buffer, sizeof(buffer));
                 if (read > 0)
-                    emit outputReady(QByteArray(buffer, static_cast<int>(read)));
+                    output.append(buffer, static_cast<int>(read));
                 else {
                     if (read < 0 && read != LIBSSH2_ERROR_EAGAIN)
                         error = QStringLiteral("终端读取失败：%1").arg(m_connection->lastError());
                     break;
                 }
             }
+        }
+        if (!output.isEmpty()) {
+            if (m_outputBackpressure)
+                m_outputInFlight += output.size();
+            emit outputReady(output);
         }
         eof = libssh2_channel_eof(m_channel) != 0;
         if (eof)

@@ -111,6 +111,31 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(m_outputFirst.contains("\x1b[?1049l"), 10000);
     }
 
+    void terminalOutputAppliesBackpressure()
+    {
+        if (!realServer)
+            QSKIP("Requires OpenSSH command execution");
+        auto *shell = m_fs.createShell(80, 24, QStringLiteral("head -c 1048576 /dev/zero"));
+        shell->setOutputBackpressure(true);
+        QSignalSpy closed(shell, &SshShellSession::sessionClosed);
+        qsizetype received = 0;
+        bool acknowledge = false;
+        connect(shell, &SshShellSession::outputReady, this, [&](const QByteArray &data) {
+            received += data.size();
+            if (acknowledge)
+                shell->acknowledgeOutput(data.size());
+        });
+        m_fs.startShell(shell);
+        QTRY_COMPARE_WITH_TIMEOUT(received, qsizetype(256 * 1024), 10000);
+        QTest::qWait(100);
+        QCOMPARE(received, qsizetype(256 * 1024));
+        acknowledge = true;
+        shell->acknowledgeOutput(received);
+        QTRY_COMPARE_WITH_TIMEOUT(received, qsizetype(1024 * 1024), 10000);
+        QTRY_COMPARE_WITH_TIMEOUT(closed.size(), 1, 10000);
+        shell->deleteLater();
+    }
+
     void closingShellKeepsFilesConnected()
     {
         QVERIFY(m_first);

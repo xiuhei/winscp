@@ -15,12 +15,12 @@ namespace wsc {
 /// QNetworkAccessManager and HTTP(S) endpoints.
 class WebDavBackend final : public Backend {
 public:
-    WebDavBackend() = default;
-    ~WebDavBackend() override = default;
+    WebDavBackend();
+    ~WebDavBackend() override;
 
     Protocol protocol() const override { return Protocol::WebDav; }
     bool connect(const SessionData &session, QString *error) override;
-    void disconnect() override { m_connected = false; }
+    void disconnect() override;
     bool isConnected() const override { return m_connected; }
 
     QString homePath() override { return m_home; }
@@ -71,6 +71,10 @@ private:
     QString httpErrorText(const HttpResult &result, const QString &context) const;
     void applySslConfiguration(QNetworkRequest *request) const;
     void attachAuthentication(QNetworkAccessManager *manager) const;
+    QNetworkAccessManager *networkManager();
+    bool download(const QString &remotePath, const QString &localPath, qint64 totalHint,
+                  const ProgressCallback &progress, CancelToken *cancel, QString *error,
+                  qint64 maxBytes);
 
     bool m_connected = false;
     bool m_verifyTls = true;
@@ -83,6 +87,7 @@ private:
     QString m_password;
     QString m_basePath = QStringLiteral("/");
     int m_timeoutMs = 20000;
+    std::unique_ptr<QNetworkAccessManager> m_network;
 };
 
 } // namespace wsc

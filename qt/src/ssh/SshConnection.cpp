@@ -401,6 +401,7 @@ bool SshConnection::connectToHost(const QString &host, int port, QString *error)
                                 .arg(host)
                                 .arg(port)
                                 .arg(m_hostKey.algorithm, m_hostKey.fingerprint));
+    m_connected = true;
     if (error)
         error->clear();
     return true;
@@ -564,6 +565,30 @@ QString SshConnection::lastError() const
     return sshErrorText(m_session, QStringLiteral("未知 SSH 错误。"));
 }
 
+bool SshConnection::waitForSocket(int timeoutMs) const
+{
+    if (!m_session || m_socket < 0)
+        return false;
+    fd_set readSet;
+    fd_set writeSet;
+    FD_ZERO(&readSet);
+    FD_ZERO(&writeSet);
+    const socket_type socketHandle = static_cast<socket_type>(m_socket);
+    FD_SET(socketHandle, &readSet);
+    FD_SET(socketHandle, &writeSet);
+    const int directions = libssh2_session_block_directions(m_session);
+    timeval timeout{timeoutMs / 1000, (timeoutMs % 1000) * 1000};
+    return ::select(
+#ifdef Q_OS_WIN
+        0,
+#else
+        socketHandle + 1,
+#endif
+        directions & LIBSSH2_SESSION_BLOCK_INBOUND ? &readSet : nullptr,
+        directions & LIBSSH2_SESSION_BLOCK_OUTBOUND ? &writeSet : nullptr,
+        nullptr, &timeout) > 0;
+}
+
 void SshConnection::enableKeepAlive(int seconds)
 {
     if (!m_session)
@@ -576,11 +601,14 @@ void SshConnection::sendKeepAlive()
     if (!m_session)
         return;
     int secondsToNext = 0;
-    libssh2_keepalive_send(m_session, &secondsToNext);
+    const int result = libssh2_keepalive_send(m_session, &secondsToNext);
+    if (result != 0 && result != LIBSSH2_ERROR_EAGAIN)
+        m_connected = false;
 }
 
 void SshConnection::disconnect()
 {
+    m_connected = false;
     if (m_session) {
         libssh2_session_set_blocking(m_session, 0);
         libssh2_session_disconnect(m_session, "WinSCPQt closing session");

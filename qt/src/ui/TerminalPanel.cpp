@@ -312,7 +312,13 @@ void TerminalPanel::openForSession(const SessionData &session, const QString &in
         }
     });
     connect(terminal, &TerminalWidget::fontZoomRequested, this, &TerminalPanel::zoomFont);
-    connect(ssh, &SshShellSession::outputReady, terminal, &TerminalWidget::feed);
+    ssh->setOutputBackpressure(true);
+    connect(ssh, &SshShellSession::outputReady, terminal,
+            [terminal, ssh = QPointer<SshShellSession>(ssh)](const QByteArray &data) {
+                terminal->feed(data);
+                if (ssh)
+                    ssh->acknowledgeOutput(data.size());
+            });
     connect(ssh, &SshShellSession::connected, this, [this, terminal = QPointer<TerminalWidget>(terminal), ssh, initialDirectory](
                                                    const QString &banner) {
         if (!terminal)

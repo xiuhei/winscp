@@ -21,6 +21,8 @@ public:
     void writeData(const QByteArray &data);
     void resizePty(int columns, int rows);
     void stop();
+    void setOutputBackpressure(bool enabled);
+    void acknowledgeOutput(qsizetype bytes);
 
 signals:
     void outputReady(const QByteArray &data);
@@ -37,6 +39,8 @@ private:
     LIBSSH2_CHANNEL *m_channel = nullptr;
     QTimer *m_timer = nullptr;
     QByteArray m_pendingInput;
+    qsizetype m_outputInFlight = 0;
+    bool m_outputBackpressure = false;
     int m_columns;
     int m_rows;
     QString m_shell;

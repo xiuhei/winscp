@@ -43,12 +43,13 @@ public:
                                          QString *error);
     bool authenticateAgent(const QString &user, QString *error);
     bool isAuthenticated() const;
-    bool isConnected() const { return m_session != nullptr; }
+    bool isConnected() const { return m_session != nullptr && m_connected; }
 
     LIBSSH2_SESSION *session() const { return m_session; }
     HostKeyInfo hostKey() const { return m_hostKey; }
     QString serverBanner() const { return m_banner; }
     QString lastError() const;
+    bool waitForSocket(int timeoutMs) const;
 
     /// Configures keep-alive and sends one keep-alive packet if needed.
     void enableKeepAlive(int seconds);
@@ -61,6 +62,7 @@ private:
     bool fail(const QString &message, QString *error);
 
     LIBSSH2_SESSION *m_session = nullptr;
+    bool m_connected = false;
     qintptr m_socket = -1;
     int m_timeoutSeconds = 20;
     HostKeyInfo m_hostKey;

@@ -89,6 +89,7 @@ private slots:
         QVERIFY(m_local);
         QTRY_COMPARE_WITH_TIMEOUT(m_remote->currentPath(), QStringLiteral("/home/test"), 10000);
         m_local->navigateLocal(m_temporary.path());
+        QTRY_COMPARE_WITH_TIMEOUT(m_local->currentPath(), m_temporary.path(), 10000);
         QDesktopServices::setUrlHandler(QStringLiteral("file"), &m_handler, "open");
     }
 
@@ -245,6 +246,7 @@ private slots:
         const QString destination = QDir(m_temporary.path()).filePath(QStringLiteral("destination"));
         QVERIFY(QDir().mkpath(destination));
         m_local->refresh();
+        QTRY_VERIFY_WITH_TIMEOUT(entry(m_local, QStringLiteral("destination")).isDir, 10000);
         const auto file = entry(m_remote, QStringLiteral("drag.txt"));
         QJsonObject info{{QStringLiteral("name"), file.name}, {QStringLiteral("path"), file.path},
                          {QStringLiteral("size"), static_cast<double>(file.size)},
@@ -502,6 +504,7 @@ private slots:
     {
         const QString local = QDir(m_temporary.path()).filePath(QStringLiteral("destination"));
         m_local->navigateLocal(local);
+        QTRY_COMPARE_WITH_TIMEOUT(m_local->currentPath(), local, 10000);
         m_remote->navigateRemote(QStringLiteral("/home/test/navigation"));
         QTRY_COMPARE_WITH_TIMEOUT(m_remote->currentPath(), QStringLiteral("/home/test/navigation"), 10000);
         const auto restored = Settings::instance().restoreDirectories(ssh);

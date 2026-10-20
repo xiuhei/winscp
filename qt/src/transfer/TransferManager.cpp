@@ -16,6 +16,8 @@
 #include <QFileInfo>
 #include <QMetaObject>
 #include <QThread>
+#include <QTimer>
+#include <mutex>
 #include <QtConcurrentRun>
 
 #include <algorithm>
@@ -29,15 +31,17 @@ struct TransferManager::Task {
     QString targetRoot;
     SessionData session;
     QList<FileInfo> entries;
+    std::mutex progressMutex;
     qint64 totalBytes = -1;
     std::atomic<qint64> doneBytes{0};
     std::atomic_bool cancel{false};
-    std::atomic_bool finished{false};
     TransferStatus status = TransferStatus::Queued;
     QString message;
     QString currentFile;
     double speed = 0;
-    int skipped = 0;
+    std::atomic_int skipped{0};
+    bool preservePermissions = true;
+    bool preserveTimestamps = true;
 };
 
 namespace {
@@ -94,6 +98,16 @@ TransferManager::TransferManager(QObject *parent)
     , m_model(new TransferQueueModel(this))
     , m_parallelLimit(qBound(1, Settings::instance().parallelTransfers, 8))
 {
+    m_progressTimer = new QTimer(this);
+    m_progressTimer->setInterval(100);
+    connect(m_progressTimer, &QTimer::timeout, this, [this] {
+        for (const auto &task : m_tasks)
+            if (task->status == TransferStatus::Running)
+                updateTaskRow(task);
+        m_futures.removeIf([](const QFuture<void> &future) { return future.isFinished(); });
+        if (m_activeCount == 0 && m_futures.empty())
+            m_progressTimer->stop();
+    });
 }
 
 TransferManager::~TransferManager()
@@ -129,6 +143,8 @@ void TransferManager::enqueueUpload(const SessionData &session, const QList<File
                                           : QStringLiteral("%1 个项目").arg(localEntries.size());
     task->targetRoot = path::normalizeRemote(remoteDirectory);
     task->session = session;
+    task->preservePermissions = Settings::instance().preservePermissions;
+    task->preserveTimestamps = Settings::instance().preserveTimestamps;
     task->entries = localEntries;
     task->status = TransferStatus::Queued;
     m_tasks.append(task);
@@ -155,6 +171,8 @@ int TransferManager::enqueueDownload(const SessionData &session,
                                            : QStringLiteral("%1 个项目").arg(remoteEntries.size());
     task->targetRoot = QDir::cleanPath(localDirectory);
     task->session = session;
+    task->preservePermissions = Settings::instance().preservePermissions;
+    task->preserveTimestamps = Settings::instance().preserveTimestamps;
     task->entries = remoteEntries;
     task->status = TransferStatus::Queued;
     m_tasks.append(task);
@@ -170,6 +188,7 @@ int TransferManager::enqueueDownload(const SessionData &session,
 
 TransferRow TransferManager::rowForTask(const TaskPtr &task) const
 {
+    std::lock_guard lock(task->progressMutex);
     TransferRow row;
     row.id = task->id;
     row.name = task->name;
@@ -183,7 +202,7 @@ TransferRow TransferManager::rowForTask(const TaskPtr &task) const
     row.message = task->message;
     row.canCancel = task->status == TransferStatus::Queued || task->status == TransferStatus::Running;
     if (task->status == TransferStatus::Completed && task->skipped > 0 && task->message.isEmpty())
-        row.message = QStringLiteral("已完成（跳过 %1 项）").arg(task->skipped);
+        row.message = QStringLiteral("已完成（跳过 %1 项）").arg(task->skipped.load());
     return row;
 }
 
@@ -208,13 +227,13 @@ void TransferManager::startQueued()
         const QFuture<void> future =
             QtConcurrent::run([this, task]() { runTask(task); });
         m_futures.append(future);
+        m_progressTimer->start();
     }
 }
 
 void TransferManager::runTask(TaskPtr task)
 {
     const auto complete = [this, task](TransferStatus status, const QString &message) {
-        task->finished.store(true);
         QMetaObject::invokeMethod(
             this, [this, task, status, message]() { finishTask(task, status, message); },
             Qt::QueuedConnection);
@@ -248,6 +267,7 @@ void TransferManager::runTask(TaskPtr task)
     }
 
     Planner planner;
+    planner.cancel = &task->cancel;
     bool planned = false;
     if (task->direction == TransferDirection::Upload) {
         planned = planUpload(task->entries, task->targetRoot, &planner, &error);
@@ -256,13 +276,17 @@ void TransferManager::runTask(TaskPtr task)
     }
     if (!planned) {
         backend->disconnect();
-        complete(TransferStatus::Failed, error.isEmpty() ? QStringLiteral("无法创建传输计划。") : error);
+        complete(task->cancel.load() || m_shuttingDown ? TransferStatus::Cancelled : TransferStatus::Failed,
+                 error.isEmpty() ? QStringLiteral("无法创建传输计划。") : error);
         return;
     }
+    task->entries.clear();
 
-    task->totalBytes = planner.totalBytes;
+    {
+        std::lock_guard lock(task->progressMutex);
+        task->totalBytes = planner.totalBytes;
+    }
     task->skipped = 0;
-    QMetaObject::invokeMethod(this, [this, task]() { updateTaskRow(task); }, Qt::QueuedConnection);
 
     if (m_shuttingDown || task->cancel.load()) {
         backend->disconnect();
@@ -290,6 +314,11 @@ bool TransferManager::planUpload(const QList<FileInfo> &entries, const QString &
                                  Planner *planner, QString *error)
 {
     for (const FileInfo &entry : entries) {
+        if (planner->cancel && planner->cancel->load()) {
+            if (error)
+                *error = QStringLiteral("传输已取消。");
+            return false;
+        }
         const QString target = path::remoteJoin(remoteDirectory, safeName(entry.name));
         if (entry.isSymlink) {
             PlanItem item;
@@ -350,6 +379,11 @@ bool TransferManager::planUploadDirectory(const QString &localDirectory,
         QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System,
         QDir::DirsFirst | QDir::Name | QDir::IgnoreCase);
     for (const QFileInfo &info : entries) {
+        if (planner->cancel && planner->cancel->load()) {
+            if (error)
+                *error = QStringLiteral("传输已取消。");
+            return false;
+        }
         const QString target =
             path::remoteJoin(remoteDirectory, safeName(info.fileName()));
         if (info.isSymLink()) {
@@ -392,6 +426,11 @@ bool TransferManager::planDownload(const QList<FileInfo> &entries, const QString
         return false;
     }
     for (const FileInfo &entry : entries) {
+        if (planner->cancel && planner->cancel->load()) {
+            if (error)
+                *error = QStringLiteral("传输已取消。");
+            return false;
+        }
         const QString target = localTarget(localDirectory, entry.name);
         if (entry.isSymlink) {
             PlanItem item;
@@ -437,6 +476,11 @@ bool TransferManager::planDownloadDirectory(const QString &remoteDirectory,
     if (!backend->list(remoteDirectory, &entries, error))
         return false;
     for (const FileInfo &entry : entries) {
+        if (planner->cancel && planner->cancel->load()) {
+            if (error)
+                *error = QStringLiteral("传输已取消。");
+            return false;
+        }
         if (entry.name == QLatin1String(".") || entry.name == QLatin1String(".."))
             continue;
         const QString target = localTarget(localDirectory, entry.name);
@@ -484,7 +528,7 @@ bool TransferManager::executePlan(TaskPtr task, Planner *planner, Backend *backe
         const qint64 now = speedTimer.elapsed();
         if (!force && now - lastEmitTime < 100)
             return;
-        double speed = task->speed;
+        double speed = 0;
         if (now > lastSpeedTime) {
             speed = static_cast<double>(overall - lastSpeedBytes) * 1000.0 /
                     static_cast<double>(now - lastSpeedTime);
@@ -492,10 +536,10 @@ bool TransferManager::executePlan(TaskPtr task, Planner *planner, Backend *backe
             lastSpeedBytes = overall;
         }
         lastEmitTime = now;
-        task->doneBytes.store(std::min(overall, task->totalBytes >= 0 ? task->totalBytes : overall));
+        std::lock_guard lock(task->progressMutex);
+        task->doneBytes.store(std::min(overall, planner->totalBytes));
         task->speed = speed;
         task->currentFile = currentFile;
-        QMetaObject::invokeMethod(this, [this, task]() { updateTaskRow(task); }, Qt::QueuedConnection);
     };
 
     for (const PlanItem &item : planner->items) {
@@ -606,12 +650,12 @@ bool TransferManager::executePlan(TaskPtr task, Planner *planner, Backend *backe
         }
 
         if (task->direction == TransferDirection::Upload) {
-            if (Settings::instance().preservePermissions && backend->supportsUnixPermissions() &&
+            if (task->preservePermissions && backend->supportsUnixPermissions() &&
                 item.mode != 0) {
                 QString ignored;
                 backend->chmod(item.target, item.mode & 0777, &ignored);
             }
-            if (Settings::instance().preserveTimestamps && item.modified.isValid() &&
+            if (task->preserveTimestamps && item.modified.isValid() &&
                 backend->canSetModifiedTime()) {
                 QString ignored;
                 backend->setModifiedTime(item.target, item.modified, &ignored);
@@ -636,9 +680,14 @@ void TransferManager::finishTask(TaskPtr task, TransferStatus status, const QStr
     const bool wasActive = task->status == TransferStatus::Running;
     task->status = status;
     task->message = message;
-    task->speed = 0;
-    if (status == TransferStatus::Completed)
-        task->doneBytes.store(task->totalBytes >= 0 ? task->totalBytes : task->doneBytes.load());
+    {
+        std::lock_guard lock(task->progressMutex);
+        task->speed = 0;
+        if (status == TransferStatus::Completed)
+            task->doneBytes.store(task->totalBytes >= 0 ? task->totalBytes : task->doneBytes.load());
+    }
+    task->entries.clear();
+    task->session = {};
     if (wasActive && m_activeCount > 0)
         --m_activeCount;
     updateTaskRow(task);
@@ -652,6 +701,16 @@ void TransferManager::finishTask(TaskPtr task, TransferStatus status, const QStr
     } else if (status == TransferStatus::Cancelled) {
         Logger::instance().warning(QStringLiteral("传输已取消：%1").arg(task->name));
     }
+    for (int index = 0; m_tasks.size() > 200 && index < m_tasks.size();) {
+        const auto old = m_tasks.at(index);
+        if (old->status == TransferStatus::Queued || old->status == TransferStatus::Running || old == task) {
+            ++index;
+            continue;
+        }
+        m_byId.remove(old->id);
+        m_tasks.removeAt(index);
+        m_model->removeRow(old->id);
+    }
     startQueued();
     if (m_activeCount == 0 && pendingCount() == 0)
         emit allTransfersFinished();
@@ -661,18 +720,20 @@ ConflictAction TransferManager::resolveConflict(const QString &targetPath,
                                                 TransferDirection direction, qint64 sourceSize,
                                                 qint64 targetSize)
 {
-    const QString policy = Settings::instance().conflictPolicy;
-    if (policy == QLatin1String("overwrite"))
-        return ConflictAction::Overwrite;
-    if (policy == QLatin1String("skip"))
-        return ConflictAction::Skip;
-    if (m_shuttingDown || !m_conflictResolver)
-        return ConflictAction::Overwrite;
-    ConflictAction action = ConflictAction::Overwrite;
+    if (m_shuttingDown)
+        return ConflictAction::Cancel;
+    ConflictAction action = ConflictAction::Cancel;
     QMetaObject::invokeMethod(
         this,
         [this, targetPath, direction, sourceSize, targetSize, &action]() {
-            if (m_conflictResolver)
+            if (m_shuttingDown)
+                return;
+            const QString policy = Settings::instance().conflictPolicy;
+            if (policy == QLatin1String("skip"))
+                action = ConflictAction::Skip;
+            else if (policy == QLatin1String("overwrite") || !m_conflictResolver)
+                action = ConflictAction::Overwrite;
+            else
                 action = m_conflictResolver(targetPath, direction, sourceSize, targetSize);
         },
         Qt::BlockingQueuedConnection);
@@ -687,6 +748,8 @@ void TransferManager::cancelTask(int id)
     if (task->status == TransferStatus::Queued) {
         task->status = TransferStatus::Cancelled;
         task->message = QStringLiteral("已取消。");
+        task->entries.clear();
+        task->session = {};
         updateTaskRow(task);
         emit taskStateChanged(id);
         emit queueChanged();
@@ -738,16 +801,12 @@ void TransferManager::shutdown()
     if (m_shuttingDown.exchange(true))
         return;
     cancelAll();
-    QElapsedTimer timer;
-    timer.start();
-    while (m_activeCount > 0 && timer.elapsed() < 20000) {
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+    while (std::any_of(m_futures.cbegin(), m_futures.cend(),
+                       [](const QFuture<void> &future) { return !future.isFinished(); })) {
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 50);
         QThread::msleep(10);
     }
-    for (QFuture<void> &future : m_futures) {
-        if (future.isValid())
-            future.waitForFinished();
-    }
+    QCoreApplication::sendPostedEvents(this);
     m_futures.clear();
 }
 

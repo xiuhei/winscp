@@ -321,6 +321,13 @@ void TerminalScreen::feed(const QString &text)
             m_state = State::Ground;
             break;
         case State::Csi:
+            if (m_csiParameters.size() + m_csiIntermediate.size() >= 1024) {
+                m_csiParameters.clear();
+                m_csiIntermediate.clear();
+                m_state = codepoint == 0x1B ? State::Escape :
+                    codepoint >= 0x40 && codepoint <= 0x7E ? State::Ground : State::CsiIgnore;
+                break;
+            }
             if (codepoint == 0x1B) {
                 m_state = State::Escape;
             } else if (codepoint == 0x18 || codepoint == 0x1A) {
@@ -352,21 +359,31 @@ void TerminalScreen::feed(const QString &text)
                 m_state = State::Escape;
             break;
         case State::Osc:
+            if (m_oscBuffer.size() >= 8192) {
+                m_oscBuffer.clear();
+                m_state = State::OscIgnore;
+            }
+            [[fallthrough]];
+        case State::OscIgnore:
             if (codepoint == 0x07) {
-                handleOsc(m_oscBuffer);
+                if (m_state == State::Osc)
+                    handleOsc(m_oscBuffer);
                 m_state = State::Ground;
             } else if (codepoint == 0x1B) {
                 m_sawEscapeInOsc = true;
             } else if (m_sawEscapeInOsc) {
                 if (codepoint == '\\') {
-                    handleOsc(m_oscBuffer);
+                    if (m_state == State::Osc)
+                        handleOsc(m_oscBuffer);
                     m_state = State::Ground;
                 } else {
-                    m_oscBuffer.append('\x1B');
-                    m_oscBuffer.append(static_cast<char>(codepoint));
+                    if (m_state == State::Osc) {
+                        m_oscBuffer.append('\x1B');
+                        m_oscBuffer.append(static_cast<char>(codepoint));
+                    }
                     m_sawEscapeInOsc = false;
                 }
-            } else {
+            } else if (m_state == State::Osc) {
                 m_oscBuffer.append(QString(character).toUtf8());
             }
             break;

@@ -15,6 +15,8 @@
 #include <functional>
 #include <memory>
 
+class QTimer;
+
 namespace wsc {
 
 class TransferQueueModel;
@@ -76,6 +78,7 @@ private:
         QVector<PlanItem> items;
         qint64 totalBytes = 0;
         int symlinkCount = 0;
+        std::atomic_bool *cancel = nullptr;
     };
 
     void startQueued();
@@ -96,6 +99,7 @@ private:
     bool executePlan(TaskPtr task, Planner *planner, Backend *backend, QString *error);
 
     TransferQueueModel *m_model = nullptr;
+    QTimer *m_progressTimer = nullptr;
     QVector<TaskPtr> m_tasks;
     QHash<int, TaskPtr> m_byId;
     QVector<QFuture<void>> m_futures;

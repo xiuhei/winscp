@@ -7,11 +7,13 @@
 #include "ssh/SshConnection.h"
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QLocale>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QScopeGuard>
 #include <QTimeZone>
 #include <QUuid>
 
@@ -210,8 +212,59 @@ QString ScpBackend::commandError(const QString &command, const QByteArray &stder
     return QStringLiteral("远程命令失败：%1\n%2").arg(command, detail);
 }
 
+bool ScpBackend::readChannel(LIBSSH2_CHANNEL *channel,
+                              const std::function<bool(const char *, qint64)> &sink,
+                              QByteArray *stderrData, CancelToken *cancel, QString *error)
+{
+    libssh2_session_set_blocking(m_ssh->session(), 0);
+    const auto restore = qScopeGuard([&] { libssh2_session_set_blocking(m_ssh->session(), 1); });
+    QElapsedTimer inactivity;
+    inactivity.start();
+    char buffer[32768];
+    while (true) {
+        if (cancel && cancel->load()) {
+            if (error)
+                *error = QStringLiteral("传输已取消。");
+            return false;
+        }
+        bool received = false;
+        for (int stream = 0; stream < 2; ++stream) {
+            for (int attempt = 0; attempt < 16; ++attempt) {
+                const auto read = libssh2_channel_read_ex(channel, stream, buffer, sizeof(buffer));
+                if (read > 0) {
+                    received = true;
+                    if (stream == 0) {
+                        if (!sink(buffer, read))
+                            return false;
+                    } else if (stderrData && stderrData->size() < 65536) {
+                        stderrData->append(buffer, std::min<qint64>(read, 65536 - stderrData->size()));
+                    }
+                } else {
+                    if (read < 0 && read != LIBSSH2_ERROR_EAGAIN) {
+                        if (error)
+                            *error = QStringLiteral("读取 SSH 通道失败：%1").arg(m_ssh->lastError());
+                        return false;
+                    }
+                    break;
+                }
+            }
+        }
+        if (libssh2_channel_eof(channel))
+            return true;
+        if (received)
+            inactivity.restart();
+        else if (inactivity.elapsed() >= m_ssh->timeoutSeconds() * 1000) {
+            if (error)
+                *error = QStringLiteral("读取 SSH 通道超时。");
+            return false;
+        } else {
+            m_ssh->waitForSocket(100);
+        }
+    }
+}
+
 bool ScpBackend::exec(const QString &command, QByteArray *output, QByteArray *errorOutput,
-                      int *exitCode, QString *error)
+                      int *exitCode, QString *error, qint64 outputLimit)
 {
     if (!isConnected()) {
         if (error)
@@ -234,40 +287,15 @@ bool ScpBackend::exec(const QString &command, QByteArray *output, QByteArray *er
 
     QByteArray stdoutData;
     QByteArray stderrData;
-    char buffer[32 * 1024];
-    bool failed = false;
-    while (true) {
-        const ssize_t read = libssh2_channel_read(channel, buffer, sizeof(buffer));
-        if (read > 0) {
-            stdoutData.append(buffer, static_cast<int>(read));
-            if (stdoutData.size() > 64 * 1024 * 1024) {
-                if (error)
-                    *error = QStringLiteral("远程命令输出过大。");
-                failed = true;
-                break;
-            }
-            continue;
+    const bool failed = !readChannel(channel, [&](const char *chunk, qint64 size) {
+        if (stdoutData.size() + size > outputLimit) {
+            if (error)
+                *error = QStringLiteral("远程命令输出过大。");
+            return false;
         }
-        if (read == 0) {
-            if (libssh2_channel_eof(channel))
-                break;
-            continue;
-        }
-        if (error)
-            *error = QStringLiteral("读取远程命令输出失败：%1").arg(m_ssh->lastError());
-        failed = true;
-        break;
-    }
-    if (!failed) {
-        while (true) {
-            const ssize_t read = libssh2_channel_read_stderr(channel, buffer, sizeof(buffer));
-            if (read > 0) {
-                stderrData.append(buffer, static_cast<int>(read));
-                continue;
-            }
-            break;
-        }
-    }
+        stdoutData.append(chunk, size);
+        return true;
+    }, &stderrData, nullptr, error);
     int status = -1;
     if (!failed) {
         libssh2_channel_close(channel);
@@ -285,11 +313,11 @@ bool ScpBackend::exec(const QString &command, QByteArray *output, QByteArray *er
     return true;
 }
 
-bool ScpBackend::execOk(const QString &command, QByteArray *output, QString *error)
+bool ScpBackend::execOk(const QString &command, QByteArray *output, QString *error, qint64 outputLimit)
 {
     QByteArray errorOutput;
     int exitCode = -1;
-    if (!exec(command, output, &errorOutput, &exitCode, error))
+    if (!exec(command, output, &errorOutput, &exitCode, error, outputLimit))
         return false;
     if (exitCode != 0) {
         if (error)
@@ -486,7 +514,7 @@ bool ScpBackend::readFile(const QString &pathValue, QByteArray *data, QString *e
         return false;
     const QString normalized = path::normalizeRemote(pathValue);
     QByteArray output;
-    if (!execOk(QStringLiteral("cat -- %1").arg(shellQuote(normalized)), &output, error))
+    if (!execOk(QStringLiteral("cat -- %1").arg(shellQuote(normalized)), &output, error, MaxEditorBytes))
         return false;
     if (output.size() > 32 * 1024 * 1024) {
         if (error)
@@ -513,7 +541,7 @@ bool ScpBackend::writeFile(const QString &pathValue, const QByteArray &data, QSt
     }
     file.write(data);
     file.close();
-    const bool ok = uploadStream(tempPath, pathValue, nullptr, nullptr, error);
+    const bool ok = uploadFile(tempPath, pathValue, nullptr, nullptr, error);
     QFile::remove(tempPath);
     return ok;
 }
@@ -549,46 +577,19 @@ bool ScpBackend::downloadStream(const QString &remotePath, const QString &localP
     }
 
     qint64 done = 0;
-    bool cancelled = false;
-    bool failed = false;
-    char buffer[128 * 1024];
-    while (true) {
-        if (cancel && cancel->load()) {
-            cancelled = true;
-            break;
-        }
-        const ssize_t read = libssh2_channel_read(channel, buffer, sizeof(buffer));
-        if (read > 0) {
-            if (output.write(buffer, read) != read) {
-                if (error)
-                    *error = QStringLiteral("写入本地文件失败：%1").arg(output.errorString());
-                failed = true;
-                break;
-            }
-            done += read;
-            if (progress)
-                progress(TransferProgress{done, totalHint, path::remoteName(remote)});
-            continue;
-        }
-        if (read == 0) {
-            if (libssh2_channel_eof(channel))
-                break;
-            continue;
-        }
-        if (error)
-            *error = QStringLiteral("读取远程文件失败：%1").arg(m_ssh->lastError());
-        failed = true;
-        break;
-    }
-
     QByteArray stderrData;
-    char errBuffer[4096];
-    while (true) {
-        const ssize_t read = libssh2_channel_read_stderr(channel, errBuffer, sizeof(errBuffer));
-        if (read <= 0)
-            break;
-        stderrData.append(errBuffer, static_cast<int>(read));
-    }
+    const bool failed = !readChannel(channel, [&](const char *chunk, qint64 size) {
+        if (output.write(chunk, size) != size) {
+            if (error)
+                *error = QStringLiteral("写入本地文件失败：%1").arg(output.errorString());
+            return false;
+        }
+        done += size;
+        if (progress)
+            progress(TransferProgress{done, totalHint, path::remoteName(remote)});
+        return true;
+    }, &stderrData, cancel, error);
+    const bool cancelled = cancel && cancel->load();
     int exitCode = -1;
     libssh2_channel_close(channel);
     exitCode = libssh2_channel_get_exit_status(channel);
@@ -658,13 +659,19 @@ bool ScpBackend::uploadStream(const QString &localPath, const QString &remotePat
             break;
         }
         const qint64 read = input.read(buffer.data(), buffer.size());
-        if (read <= 0)
+        if (read < 0) {
+            failed = true;
+            if (error)
+                *error = input.errorString();
+            break;
+        }
+        if (read == 0)
             break;
         qint64 offset = 0;
         while (offset < read) {
             const ssize_t written = libssh2_channel_write(channel, buffer.constData() + offset,
                                                           static_cast<size_t>(read - offset));
-            if (written < 0) {
+            if (written <= 0) {
                 if (error)
                     *error = QStringLiteral("写入远程文件失败：%1").arg(m_ssh->lastError());
                 failed = true;
@@ -680,20 +687,13 @@ bool ScpBackend::uploadStream(const QString &localPath, const QString &remotePat
     }
     libssh2_channel_send_eof(channel);
     QByteArray stderrData;
-    char errBuffer[4096];
-    while (true) {
-        const ssize_t read = libssh2_channel_read_stderr(channel, errBuffer, sizeof(errBuffer));
-        if (read <= 0)
-            break;
-        stderrData.append(errBuffer, static_cast<int>(read));
-    }
+    if (!readChannel(channel, [](const char *, qint64) { return true; }, &stderrData, nullptr, error))
+        failed = true;
     libssh2_channel_close(channel);
     const int exitCode = libssh2_channel_get_exit_status(channel);
     libssh2_channel_free(channel);
 
     if (cancelled || failed) {
-        QString ignored;
-        execOk(QStringLiteral("rm -f -- %1").arg(shellQuote(remote)), nullptr, &ignored);
         if (error)
             *error = cancelled ? QStringLiteral("传输已取消。")
                                : QStringLiteral("上传失败。");
@@ -720,7 +720,37 @@ bool ScpBackend::downloadFile(const QString &remotePath, const QString &localPat
 bool ScpBackend::uploadFile(const QString &localPath, const QString &remotePath,
                             const ProgressCallback &progress, CancelToken *cancel, QString *error)
 {
-    return uploadStream(localPath, remotePath, progress, cancel, error);
+    QString target = path::normalizeRemote(remotePath);
+    FileInfo existing;
+    bool exists = stat(target, &existing, nullptr);
+    if (exists && existing.isDir) {
+        if (error)
+            *error = QStringLiteral("上传目标是一个目录。");
+        return false;
+    }
+    if (exists && existing.isSymlink) {
+        QByteArray resolved;
+        if (!execOk(QStringLiteral("readlink -f -- %1").arg(shellQuote(target)), &resolved, error) ||
+            !resolved.trimmed().startsWith('/')) {
+            if (error)
+                *error = QStringLiteral("无法解析上传目标的符号链接。");
+            return false;
+        }
+        target = QString::fromUtf8(resolved).trimmed();
+        exists = stat(target, &existing, nullptr);
+    }
+    const QString temporary = path::remoteJoin(path::remoteParent(target),
+        QStringLiteral(".winscp-upload-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    auto cleanup = qScopeGuard([&] { removeFile(temporary, nullptr); });
+    if (!uploadStream(localPath, temporary, progress, cancel, error) ||
+        (cancel && cancel->load()))
+        return false;
+    if (exists && !chmod(temporary, existing.mode & 0777, error))
+        return false;
+    if (!rename(temporary, target, error))
+        return false;
+    cleanup.dismiss();
+    return true;
 }
 
 bool ScpBackend::setModifiedTime(const QString &pathValue, const QDateTime &time, QString *error)

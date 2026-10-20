@@ -10,10 +10,47 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QTextStream>
+#include <QTemporaryFile>
+#include <QScopeGuard>
+#include <QUuid>
 
 #include <cstdio>
 
 using namespace wsc;
+
+static bool verifyCancelledOverwrite(Backend *backend, const QString &home, QString *error)
+{
+    const QString directory = path::remoteJoin(home,
+        QStringLiteral(".winscp-cancel-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (!backend->mkdir(directory, error))
+        return false;
+    const auto cleanup = qScopeGuard([&] { backend->removeDir(directory, nullptr); });
+    const QString target = path::remoteJoin(directory, QStringLiteral("original.txt"));
+    if (!backend->writeFile(target, QByteArrayLiteral("original contents"), error))
+        return false;
+    QTemporaryFile input;
+    if (!input.open() || input.write(QByteArray(512 * 1024, 'x')) != 512 * 1024 || !input.flush())
+        return false;
+    input.close();
+    CancelToken cancel{false};
+    const bool uploaded = backend->uploadFile(input.fileName(), target,
+        [&](const TransferProgress &) { cancel.store(true); }, &cancel, error);
+    if (uploaded || !cancel.load()) {
+        *error = QStringLiteral("取消上传未生效。");
+        return false;
+    }
+    QByteArray contents;
+    if (!backend->readFile(target, &contents, error) || contents != QByteArrayLiteral("original contents")) {
+        *error = QStringLiteral("取消覆盖上传破坏了原文件。");
+        return false;
+    }
+    FileList files;
+    if (!backend->list(directory, &files, error) || files.size() != 1) {
+        *error = QStringLiteral("上传取消后残留临时文件。");
+        return false;
+    }
+    return true;
+}
 
 int main(int argc, char *argv[])
 {
@@ -100,6 +137,13 @@ int main(int argc, char *argv[])
             }
             std::printf("removed %s\n", qPrintable(remotePath));
         }
+    }
+    if (session.protocol == Protocol::Sftp || session.protocol == Protocol::Scp) {
+        if (!verifyCancelledOverwrite(backend.get(), home, &error)) {
+            std::fprintf(stderr, "cancel regression failed: %s\n", qPrintable(error));
+            return 1;
+        }
+        std::printf("cancelled overwrite preserved original and removed temporary files\n");
     }
     backend->disconnect();
     return 0;
