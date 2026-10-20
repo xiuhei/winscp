@@ -261,6 +261,38 @@ private slots:
         QFile downloaded(target);
         QVERIFY(downloaded.open(QIODevice::ReadOnly));
         QCOMPARE(downloaded.readAll(), contents);
+        QVERIFY(!queue->isVisible());
+        for (auto *action : m_window->findChildren<QAction *>())
+            if (action->text().contains(QStringLiteral("显示传输队列")))
+                QVERIFY(!action->isChecked());
+    }
+
+    void transferQueueRetainsErrors()
+    {
+        auto *transfers = m_window->findChild<TransferManager *>();
+        auto *queue = m_window->findChild<QDialog *>(QStringLiteral("TransferQueueWindow"));
+        QSignalSpy finished(transfers, &TransferManager::allTransfersFinished);
+        FileInfo missing;
+        missing.name = QStringLiteral("missing-download.txt");
+        missing.path = QStringLiteral("/home/test/missing-download.txt");
+        missing.size = 1;
+        const QString destination = QDir(m_temporary.path()).filePath(QStringLiteral("queue-results"));
+        const int failed = transfers->enqueueDownload(ssh, {missing}, destination);
+        QVERIFY(queue->isVisible());
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 15000);
+        QCOMPARE(transfers->model()->rowAt(transfers->model()->rowForId(failed)).status, TransferStatus::Failed);
+        QVERIFY(queue->isVisible());
+        const FileInfo file = entry(m_remote, QStringLiteral("drag.txt"));
+        QVERIFY(file.isValid());
+        transfers->enqueueDownload(ssh, {file}, destination);
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 2, 15000);
+        QVERIFY(QFileInfo::exists(QDir(destination).filePath(file.name)));
+        QVERIFY(!queue->isVisible());
+        const int cancelled = transfers->enqueueDownload(ssh, {file}, destination);
+        transfers->cancelTask(cancelled);
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 3, 15000);
+        QCOMPARE(transfers->model()->rowAt(transfers->model()->rowForId(cancelled)).status, TransferStatus::Cancelled);
+        QVERIFY(queue->isVisible());
     }
 
     void remoteOpenCache()

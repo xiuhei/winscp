@@ -552,7 +552,16 @@ void MainWindow::connectSignals()
         showStatus(active > 0 ? QStringLiteral("已加入传输队列，共 %1 个活动任务。").arg(active)
                               : QStringLiteral("已加入传输队列。"));
     });
+    connect(m_transferManager, &TransferManager::taskStateChanged, this, [this](int id) {
+        const auto row = m_transferManager->model()->rowAt(m_transferManager->model()->rowForId(id));
+        if (!m_transferManager->opensFile(id) &&
+            (row.status == TransferStatus::Failed || row.status == TransferStatus::Cancelled))
+            m_transferBatchHasErrors = true;
+    });
     connect(m_transferManager, &TransferManager::allTransfersFinished, this, [this] {
+        if (!m_transferBatchHasErrors)
+            showTransferQueue(false);
+        m_transferBatchHasErrors = false;
         updateTransferSummary();
         showStatus(QStringLiteral("所有传输任务已完成。"));
         m_localPane->refresh();

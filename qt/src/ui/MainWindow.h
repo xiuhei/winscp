@@ -154,6 +154,7 @@ private:
     bool m_demo = false;
     bool m_closing = false;
     bool m_loginAfterDisconnect = false;
+    bool m_transferBatchHasErrors = false;
 };
 
 } // namespace wsc
