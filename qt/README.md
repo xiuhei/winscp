@@ -9,7 +9,7 @@ Windows 文件管理器，使用 C++20、Qt 6 Widgets、libssh2 和 Qt Network�
 - SFTP、SCP、FTP、显式/隐式 FTPS、HTTP/HTTPS WebDAV，以及本地文件浏览。
 - 双栏文件管理、`..` 上一级目录、可点击的各级路径、路径历史、筛选、隐藏文件、拖放上传下载、新建、重命名、递归删除、属性、Unix 权限和符号链接。
 - 站点和最近会话、按站点恢复上次使用的本地和远程目录、Windows DPAPI 密码保存、SSH 主机密钥验证。
-- 后台传输队列、并发任务、进度、取消、冲突确认、修改时间和权限保留。
+- 独立窗口显示后台传输队列，不挤占主窗口；支持并发任务、进度、取消、冲突确认、修改时间和权限保留。
 - 本地到远程、远程到本地及双向目录比较，预览后同步。
 - 内置文本编辑器，保存远程文件后上传；深色和浅色主题。
 
@@ -39,10 +39,10 @@ Windows 文件管理器，使用 C++20、Qt 6 Widgets、libssh2 和 Qt Network�
 
 ```powershell
 .\qt\scripts\build.ps1 -Configuration Debug
-.\qt\scripts\deploy.ps1 -PackageName WinSCPQt-enhanced-win64
+.\qt\scripts\deploy.ps1 -PackageName WinSCPQt-floating-win64
 ```
 
-开发程序在 `qt/build/Debug/WinSCPQt.exe`。便携发布包在 `qt/dist/WinSCPQt-enhanced-win64.zip`，解压后运行 `WinSCPQt.exe`；程序目录下的 `portable.ini` 使配置保存在 `data/`。不要覆盖已有便携目录中的 `data/` 或 `downloads/`。
+开发程序在 `qt/build/Debug/WinSCPQt.exe`。便携发布包在 `qt/dist/WinSCPQt-floating-win64.zip`，解压后运行 `WinSCPQt.exe`；程序目录下的 `portable.ini` 使配置保存在 `data/`。不要覆盖已有便携目录中的 `data/` 或 `downloads/`。
 
 ```powershell
 WinSCPQt.exe

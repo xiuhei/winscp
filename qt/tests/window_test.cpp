@@ -17,7 +17,7 @@
 #include <QMessageBox>
 #include <QSplitter>
 #include <QDesktopServices>
-#include <QDockWidget>
+#include <QDialog>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
@@ -138,7 +138,20 @@ private slots:
         local.close();
         QMimeData upload;
         upload.setUrls({QUrl::fromLocalFile(source)});
+        const QRect mainGeometry = m_window->geometry();
+        const QRect fileGeometry = m_window->centralWidget()->geometry();
         QVERIFY(drop(m_remote, upload, QStringLiteral("navigation")));
+        auto *queue = m_window->findChild<QDialog *>(QStringLiteral("TransferQueueWindow"));
+        QVERIFY(queue);
+        QVERIFY(queue->isVisible());
+        QVERIFY(queue->isWindow());
+        QVERIFY(!queue->isModal());
+        QCOMPARE(m_window->geometry(), mainGeometry);
+        QCOMPARE(m_window->centralWidget()->geometry(), fileGeometry);
+        queue->close();
+        for (auto *action : m_window->findChildren<QAction *>())
+            if (action->text().contains(QStringLiteral("显示传输队列")))
+                QVERIFY(!action->isChecked());
         auto *transfers = m_window->findChild<TransferManager *>();
         QTRY_VERIFY_WITH_TIMEOUT(transfers->activeCount() == 0 && transfers->pendingCount() == 0, 15000);
         m_remote->navigateRemote(QStringLiteral("/home/test/navigation"));
@@ -155,6 +168,8 @@ private slots:
         download.setData(QStringLiteral("application/x-winscpqt-entries"), QJsonDocument(QJsonObject{
             {QStringLiteral("sourceRemote"), true}, {QStringLiteral("entries"), QJsonArray{info}}}).toJson());
         QVERIFY(drop(m_local, download, QStringLiteral("destination")));
+        QVERIFY(queue->isVisible());
+        QCOMPARE(m_window->centralWidget()->geometry(), fileGeometry);
         const QString target = QDir(destination).filePath(QStringLiteral("drag.txt"));
         QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(target), 15000);
         QTRY_VERIFY_WITH_TIMEOUT(transfers->activeCount() == 0 && transfers->pendingCount() == 0, 15000);
@@ -183,9 +198,9 @@ private slots:
     void remoteOpenCache()
     {
         auto *transfers = m_window->findChild<TransferManager *>();
-        const auto docks = m_window->findChildren<QDockWidget *>();
-        for (auto *dock : docks)
-            dock->hide();
+        auto *queue = m_window->findChild<QDialog *>(QStringLiteral("TransferQueueWindow"));
+        QVERIFY(queue);
+        queue->close();
         QSignalSpy added(transfers, &TransferManager::taskAdded);
         const FileInfo file = entry(m_remote, QStringLiteral("drag.txt"));
         QVERIFY(file.isValid());
@@ -200,8 +215,7 @@ private slots:
         m_remote->openRequested(file, true);
         QTRY_COMPARE_WITH_TIMEOUT(m_handler.opened.size(), 1, 15000);
         QCOMPARE(added.size(), 1);
-        for (auto *dock : docks)
-            QVERIFY(!dock->isVisible());
+        QVERIFY(!queue->isVisible());
         const QString cached = m_handler.opened.last().toLocalFile();
         QVERIFY(cached.startsWith(AppPaths::downloadCacheDir() + QLatin1Char('/')));
         QVERIFY(QFileInfo::exists(cached));

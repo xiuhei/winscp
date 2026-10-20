@@ -11,7 +11,7 @@
 #include <QUrl>
 
 class QAction;
-class QDockWidget;
+class QDialog;
 class QLabel;
 class QMenu;
 class QProgressBar;
@@ -45,7 +45,7 @@ private:
     void buildMenus();
     void buildToolbar();
     void buildStatusBar();
-    void buildDocks();
+    void buildTransferWindow();
     void connectSignals();
     void restoreWindowSettings();
     void saveWindowSettings();
@@ -66,7 +66,7 @@ private:
     void updateActionIcons();
     void refreshTheme();
     void showStatus(const QString &message, bool error = false);
-    void showTransferDock(bool visible);
+    void showTransferQueue(bool visible);
 
     void uploadSelection();
     void downloadSelection();
@@ -115,7 +115,7 @@ private:
     RemoteFileOpener *m_fileOpener = nullptr;
     TransferManager *m_transferManager = nullptr;
     TransferQueueWidget *m_queueWidget = nullptr;
-    QDockWidget *m_queueDock = nullptr;
+    QDialog *m_queueDialog = nullptr;
     QToolBar *m_toolBar = nullptr;
 
     QAction *m_newSessionAction = nullptr;

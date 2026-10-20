@@ -31,7 +31,7 @@
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
-#include <QDockWidget>
+#include <QDialog>
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
@@ -134,7 +134,7 @@ MainWindow::MainWindow(QWidget *parent)
     buildMenus();
     buildToolbar();
     buildStatusBar();
-    buildDocks();
+    buildTransferWindow();
     connectSignals();
     restoreWindowSettings();
     updateRecentMenu();
@@ -285,7 +285,7 @@ void MainWindow::buildActions()
         m_localPane->setShowHidden(checked);
         m_remotePane->setShowHidden(checked);
     });
-    connect(m_queueAction, &QAction::toggled, this, &MainWindow::showTransferDock);
+    connect(m_queueAction, &QAction::toggled, this, &MainWindow::showTransferQueue);
     connect(m_clearQueueAction, &QAction::triggered, this, [this] {
         m_transferManager->clearFinished();
         updateTransferSummary();
@@ -454,22 +454,19 @@ void MainWindow::buildStatusBar()
     statusBar()->addPermanentWidget(m_siteLabel);
 }
 
-void MainWindow::buildDocks()
+void MainWindow::buildTransferWindow()
 {
-    m_queueDock = new QDockWidget(QStringLiteral("传输队列"), this);
-    m_queueDock->setObjectName(QStringLiteral("TransferQueueDock"));
-    m_queueDock->setAllowedAreas(Qt::RightDockWidgetArea | Qt::BottomDockWidgetArea);
-    m_queueDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable |
-                             QDockWidget::DockWidgetFloatable);
-    m_queueDock->setWidget(m_queueWidget);
-    m_queueDock->setMinimumWidth(420);
-    addDockWidget(Qt::RightDockWidgetArea, m_queueDock);
-    m_queueDock->hide();
-    connect(m_queueDock, &QDockWidget::visibilityChanged, this, [this](bool visible) {
-        if (m_queueAction) {
-            const QSignalBlocker blocker(m_queueAction);
-            m_queueAction->setChecked(visible);
-        }
+    m_queueDialog = new QDialog(this, Qt::Window);
+    m_queueDialog->setObjectName(QStringLiteral("TransferQueueWindow"));
+    m_queueDialog->setWindowTitle(QStringLiteral("传输队列"));
+    m_queueDialog->setWindowModality(Qt::NonModal);
+    m_queueDialog->resize(860, 300);
+    auto *layout = new QVBoxLayout(m_queueDialog);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->addWidget(m_queueWidget);
+    connect(m_queueDialog, &QDialog::finished, this, [this](int) {
+        const QSignalBlocker blocker(m_queueAction);
+        m_queueAction->setChecked(false);
     });
 }
 
@@ -555,7 +552,7 @@ void MainWindow::connectSignals()
 
     connect(m_transferManager, &TransferManager::taskAdded, this, [this](int id) {
         if (!m_transferManager->opensFile(id))
-            showTransferDock(true);
+            showTransferQueue(true);
         updateTransferSummary();
         const int active = m_transferManager->model()->activeCount();
         showStatus(active > 0 ? QStringLiteral("已加入传输队列，共 %1 个活动任务。").arg(active)
@@ -945,7 +942,7 @@ void MainWindow::uploadEntries(const QList<FileInfo> &entries, const QString &ta
     const QString target = targetDirectory.isEmpty() ? m_remotePane->currentPath()
                                                      : targetDirectory;
     m_transferManager->enqueueUpload(m_session, entries, target);
-    showTransferDock(true);
+    showTransferQueue(true);
 }
 
 void MainWindow::downloadEntries(const QList<FileInfo> &entries, const QString &targetDirectory,
@@ -960,7 +957,7 @@ void MainWindow::downloadEntries(const QList<FileInfo> &entries, const QString &
     QString target = targetDirectory.isEmpty() ? m_localPane->currentPath() : targetDirectory;
     QDir().mkpath(target);
     m_transferManager->enqueueDownload(m_session, entries, target, openWhenDone);
-    showTransferDock(true);
+    showTransferQueue(true);
 }
 
 void MainWindow::deleteEntries(const QList<FileInfo> &entries, bool remote)
@@ -1460,19 +1457,19 @@ void MainWindow::showStatus(const QString &message, bool error)
     m_statusLabel->setToolTip(message);
 }
 
-void MainWindow::showTransferDock(bool visible)
+void MainWindow::showTransferQueue(bool visible)
 {
-    if (!m_queueDock)
+    if (!m_queueDialog)
         return;
     if (m_queueAction) {
         const QSignalBlocker blocker(m_queueAction);
         m_queueAction->setChecked(visible);
     }
     if (visible) {
-        m_queueDock->show();
-        m_queueDock->raise();
+        m_queueDialog->show();
+        m_queueDialog->raise();
     } else {
-        m_queueDock->hide();
+        m_queueDialog->hide();
     }
 }
 
