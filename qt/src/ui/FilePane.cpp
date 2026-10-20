@@ -268,24 +268,21 @@ void FilePane::buildUi()
     if (isRemote()) {
         m_autoRefreshButton = new QToolButton(header);
         m_autoRefreshButton->setObjectName(QStringLiteral("AutoRefreshButton"));
-        m_autoRefreshButton->setText(QStringLiteral("自动刷新"));
-        m_autoRefreshButton->setToolTip(QStringLiteral("每 2 秒刷新当前远程目录"));
         m_autoRefreshButton->setCheckable(true);
         m_autoRefreshButton->setAutoRaise(true);
         m_autoRefreshButton->setChecked(Settings::instance().autoRefresh);
         titleRow->addWidget(m_autoRefreshButton);
-        auto *timer = new QTimer(this);
-        timer->setInterval(2000);
-        connect(timer, &QTimer::timeout, this, [this] {
-            if (m_autoRefreshButton->isChecked() && m_remoteConnected && !m_loading &&
-                m_controller && !m_controller->isBusy())
-                refresh();
-        });
-        connect(m_autoRefreshButton, &QToolButton::toggled, this, [](bool enabled) {
+        m_autoRefreshTimer = new QTimer(this);
+        m_autoRefreshTimer->setInterval(2000);
+        m_autoRefreshTimer->setTimerType(Qt::PreciseTimer);
+        connect(m_autoRefreshTimer, &QTimer::timeout, this, &FilePane::refresh);
+        connect(m_autoRefreshButton, &QToolButton::toggled, this, [this](bool enabled) {
             Settings::instance().autoRefresh = enabled;
             Settings::instance().save();
+            updateAutoRefreshButton();
+            if (enabled)
+                refresh();
         });
-        timer->start();
     }
     titleRow->addWidget(m_terminalButton);
     titleRow->addWidget(m_hiddenButton);
@@ -652,6 +649,8 @@ void FilePane::attachController(FileSystemController *controller)
     connect(controller, &FileSystemController::directoryFailed, this,
             [this](const QString &path, const QString &message) {
                 setLoading(false);
+                m_refreshError = message;
+                updateAutoRefreshButton();
                 m_pendingHistory = false;
                 m_pendingRemotePath.clear();
                 m_statusLabel->setText(QStringLiteral("无法读取 %1：%2")
@@ -690,6 +689,8 @@ void FilePane::setRemoteConnecting(const SessionData &session)
     if (m_role != Role::Remote)
         return;
     m_session = session;
+    m_lastRemoteRefresh = {};
+    m_refreshError.clear();
     m_remotePath.clear();
     m_history.clear();
     m_historyIndex = -1;
@@ -851,13 +852,16 @@ void FilePane::applyRemoteListing(const QString &path, const QList<FileInfo> &en
         return names;
     }();
     m_remotePath = normalized;
+    m_lastRemoteRefresh = QDateTime::currentDateTime();
+    m_refreshError.clear();
     m_model->setEntries(withParent(entries, normalized, true));
     m_proxy->setShowHidden(m_showHidden);
     m_table->clearSelection();
     m_table->setCurrentIndex(QModelIndex());
     m_stack->setCurrentIndex(0);
     updateHeader();
-    updateCombo(normalized);
+    if (!sameDirectory)
+        updateCombo(normalized);
     updateStatus();
     updateEmptyState();
     setLoading(false);
@@ -1148,7 +1152,7 @@ void FilePane::updateCombo(const QString &path)
         target = QStringLiteral("//") + parts.takeFirst();
         if (!parts.isEmpty())
             target += QLatin1Char('/') + parts.takeFirst();
-        links = {link(target, target)};
+        links = {link(isRemote() ? target : QDir::toNativeSeparators(target), target)};
     }
     for (const QString &part : parts) {
         if (!target.isEmpty() && !target.endsWith(QLatin1Char('/')))
@@ -1156,9 +1160,14 @@ void FilePane::updateCombo(const QString &path)
         target += part;
         if (target.endsWith(QLatin1Char(':')))
             target += QLatin1Char('/');
-        links.append(link(part, target));
+        const QString label = !isRemote() && parts.size() == 1 && part.endsWith(QLatin1Char(':'))
+            ? part + QLatin1Char('\\') : part;
+        links.append(link(label, target));
     }
-    m_breadcrumbs->setText(links.join(QStringLiteral(" &#8250; ")));
+    const QString separator = isRemote() ? QStringLiteral("/") : QStringLiteral("\\");
+    const QString breadcrumb = normalized.startsWith(QLatin1Char('/')) && !normalized.startsWith(QStringLiteral("//"))
+        ? links.value(0) + links.mid(1).join(separator) : links.join(separator);
+    m_breadcrumbs->setText(breadcrumb);
     m_breadcrumbs->setToolTip(path);
     m_pathStack->setCurrentIndex(0);
     const QSignalBlocker blocker(m_pathCombo);
@@ -1240,6 +1249,27 @@ void FilePane::updateEmptyState()
     }
 }
 
+void FilePane::updateAutoRefreshButton()
+{
+    if (!m_autoRefreshButton)
+        return;
+    const bool enabled = m_autoRefreshButton->isChecked();
+    m_autoRefreshButton->setText(!enabled ? QStringLiteral("自动刷新：关")
+        : (m_refreshError.isEmpty() ? QStringLiteral("自动刷新：开") : QStringLiteral("自动刷新：重试")));
+    QString tooltip = QStringLiteral("开启后每 2 秒读取服务器上的当前目录；关闭后停止自动刷新。");
+    if (m_lastRemoteRefresh.isValid())
+        tooltip += QStringLiteral("\n上次成功刷新：%1").arg(m_lastRemoteRefresh.toString(QStringLiteral("HH:mm:ss")));
+    if (!m_refreshError.isEmpty())
+        tooltip += QStringLiteral("\n最近错误：%1").arg(m_refreshError);
+    m_autoRefreshButton->setToolTip(tooltip);
+    if (enabled && m_remoteConnected) {
+        if (!m_autoRefreshTimer->isActive())
+            m_autoRefreshTimer->start();
+    } else {
+        m_autoRefreshTimer->stop();
+    }
+}
+
 void FilePane::updateNavigationButtons()
 {
     const bool canBack = m_historyIndex > 0;
@@ -1253,6 +1283,7 @@ void FilePane::updateNavigationButtons()
         m_pathCombo->setEnabled(m_remoteConnected);
         m_pathStack->setEnabled(m_remoteConnected);
         m_autoRefreshButton->setEnabled(m_remoteConnected);
+        updateAutoRefreshButton();
         m_disconnectButton->setVisible(m_remoteConnected);
         m_connectButton->setVisible(!m_remoteConnected && !m_connecting);
         m_connectButton->setEnabled(!m_connecting);

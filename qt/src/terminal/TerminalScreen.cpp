@@ -1,5 +1,4 @@
 #include "terminal/TerminalScreen.h"
-#include <QUrl>
 
 #include <QStringList>
 
@@ -1131,19 +1130,6 @@ void TerminalScreen::handleOsc(const QByteArray &payload)
     const int command = payload.left(separator).toInt(&ok);
     if (!ok)
         return;
-    QString directory;
-    const QByteArray value = payload.mid(separator + 1);
-    if (command == 7) {
-        const QUrl url = QUrl::fromEncoded(value);
-        if (url.scheme() == QLatin1String("file"))
-            directory = url.path();
-    } else if (command == 777 && value.startsWith("winscp-shell;")) {
-        m_shellName = QString::fromUtf8(value.mid(13));
-    } else if (command == 777 && value.startsWith("winscp-cwd;")) {
-        directory = QString::fromUtf8(value.mid(11));
-    }
-    if (directory.startsWith(QLatin1Char('/')) && !directory.contains(QChar::Null))
-        m_workingDirectories.append(directory);
     if (command == 0 || command == 2) {
         const QString title = decodeUtf8(payload.mid(separator + 1)).trimmed();
         if (!title.isEmpty() && title != m_title) {
@@ -1151,20 +1137,6 @@ void TerminalScreen::handleOsc(const QByteArray &payload)
             m_titleChanged = true;
         }
     }
-}
-
-QString TerminalScreen::takeShellName()
-{
-    QString result;
-    result.swap(m_shellName);
-    return result;
-}
-
-QStringList TerminalScreen::takeWorkingDirectories()
-{
-    QStringList result;
-    result.swap(m_workingDirectories);
-    return result;
 }
 
 QByteArray TerminalScreen::takeResponses()

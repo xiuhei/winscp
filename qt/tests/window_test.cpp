@@ -12,6 +12,7 @@
 #include "ui/TerminalPanel.h"
 
 #include <QAction>
+#include <QComboBox>
 #include <QAbstractButton>
 #include <QApplication>
 #include <QMessageBox>
@@ -26,12 +27,14 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMimeData>
 #include <QProgressDialog>
 #include <QSaveFile>
 #include <QTableView>
 #include <QTemporaryDir>
 #include <QToolButton>
+#include <QTextDocument>
 #include <QtTest>
 #include <algorithm>
 
@@ -63,6 +66,7 @@ private slots:
         m_panel = m_window->findChild<TerminalPanel *>();
         QVERIFY(m_fs);
         QVERIFY(m_panel);
+        QVERIFY(!m_panel->findChild<QToolButton *>(QStringLiteral("DirectorySyncButton")));
         QTRY_VERIFY_WITH_TIMEOUT(m_fs->isConnected(), 20000);
         QTRY_COMPARE_WITH_TIMEOUT(m_panel->terminalCount(), 1, 10000);
         QTRY_VERIFY_WITH_TIMEOUT(m_panel->findChild<TerminalWidget *>()->isSessionRunning(), 10000);
@@ -83,7 +87,7 @@ private slots:
         QDesktopServices::setUrlHandler(QStringLiteral("file"), &m_handler, "open");
     }
 
-    void navigationAndSynchronization()
+    void navigationAndAutoRefresh()
     {
         QVERIFY(m_remote->entryAtViewRow(0).isParent);
         auto *table = m_remote->findChild<QTableView *>();
@@ -100,12 +104,14 @@ private slots:
         m_fs->createDirectory(QStringLiteral("/home/test/navigation"));
         QTRY_VERIFY_WITH_TIMEOUT(!operations.isEmpty(), 10000);
         QVERIFY(operations.last().at(1).toBool());
-        m_panel->setDirectorySynchronizationEnabled(true);
-        QSignalSpy directories(m_panel, &TerminalPanel::directoryChanged);
         m_remote->navigateRemote(QStringLiteral("/home/test/navigation"));
         QTRY_COMPARE_WITH_TIMEOUT(m_remote->currentPath(), QStringLiteral("/home/test/navigation"), 10000);
-        QTRY_VERIFY_WITH_TIMEOUT(reported(directories, QStringLiteral("/home/test/navigation")), 10000);
-        command("cd /home/test");
+        command("printf 'CURRENT_DIRECTORY:%s\\n' \"$PWD\"");
+        auto *terminal = m_panel->findChild<TerminalWidget *>();
+        QTRY_VERIFY_WITH_TIMEOUT(terminal->screen()->textRange(0, 0, terminal->screen()->totalLines() - 1,
+            terminal->screen()->columns()).contains(QStringLiteral("CURRENT_DIRECTORY:/home/test")), 10000);
+        QCOMPARE(m_remote->currentPath(), QStringLiteral("/home/test/navigation"));
+        m_remote->navigateRemote(QStringLiteral("/home/test"));
         QTRY_COMPARE_WITH_TIMEOUT(m_remote->currentPath(), QStringLiteral("/home/test"), 10000);
 
         auto *refresh = m_remote->findChild<QToolButton *>(QStringLiteral("AutoRefreshButton"));
@@ -124,8 +130,67 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(m_remote->currentPath(), QStringLiteral("/home/test/navigation"), 10000);
         auto *breadcrumbs = m_remote->findChild<QLabel *>(QStringLiteral("PathBreadcrumbs"));
         QVERIFY(breadcrumbs->text().contains(QStringLiteral("navigation")));
+        QTextDocument rendered;
+        rendered.setHtml(breadcrumbs->text());
+        QCOMPARE(rendered.toPlainText(), QStringLiteral("/home/test/navigation"));
+        auto *localPath = m_local->findChild<QLabel *>(QStringLiteral("PathBreadcrumbs"));
+        rendered.setHtml(localPath->text());
+        QCOMPARE(rendered.toPlainText(), QDir::toNativeSeparators(m_local->currentPath()));
         QVERIFY(QMetaObject::invokeMethod(breadcrumbs, "linkActivated", Q_ARG(QString, QStringLiteral("%2Fhome%2Ftest"))));
         QTRY_COMPARE_WITH_TIMEOUT(m_remote->currentPath(), QStringLiteral("/home/test"), 10000);
+    }
+
+    void automaticRefreshReadsRemoteChanges()
+    {
+        auto backend = createBackend(ssh.protocol);
+        QString error;
+        QVERIFY2(backend->connect(ssh, &error), qPrintable(error));
+        auto *button = m_remote->findChild<QToolButton *>(QStringLiteral("AutoRefreshButton"));
+        QVERIFY(button);
+        QTest::mouseClick(button, Qt::LeftButton);
+        QVERIFY(button->isChecked());
+        QVERIFY(button->text().contains(QStringLiteral("开")));
+        QTRY_VERIFY_WITH_TIMEOUT(button->toolTip().contains(QStringLiteral("上次成功刷新")), 5000);
+
+        const QString remoteFile = QStringLiteral("/home/test/automatic-refresh.txt");
+        const QByteArray content("written from an independent connection");
+        QVERIFY2(backend->writeFile(remoteFile, content, &error), qPrintable(error));
+        QTRY_COMPARE_WITH_TIMEOUT(entry(m_remote, QStringLiteral("automatic-refresh.txt")).size, content.size(), 4500);
+        const QByteArray changed("updated from an independent connection, with a different size");
+        QVERIFY2(backend->writeFile(remoteFile, changed, &error), qPrintable(error));
+        QTRY_COMPARE_WITH_TIMEOUT(entry(m_remote, QStringLiteral("automatic-refresh.txt")).size, changed.size(), 4500);
+
+        m_remote->focusPathEditor();
+        auto *path = m_remote->findChild<QComboBox *>();
+        path->lineEdit()->setText(QStringLiteral("/unfinished user input"));
+        QSignalSpy listings(m_fs, &FileSystemController::directoryListed);
+        QTRY_VERIFY_WITH_TIMEOUT(!listings.isEmpty(), 4500);
+        QVERIFY(path->isVisible());
+        QCOMPARE(path->lineEdit()->text(), QStringLiteral("/unfinished user input"));
+        m_remote->focusFileList();
+        QVERIFY2(backend->removeFile(remoteFile, &error), qPrintable(error));
+        QTRY_VERIFY_WITH_TIMEOUT(!entry(m_remote, QStringLiteral("automatic-refresh.txt")).isValid(), 4500);
+
+        QSignalSpy failed(m_fs, &FileSystemController::directoryFailed);
+        m_remote->navigateRemote(QStringLiteral("/home/test/missing-refresh-directory"));
+        QTRY_VERIFY_WITH_TIMEOUT(!failed.isEmpty(), 5000);
+        QVERIFY(button->text().contains(QStringLiteral("重试")));
+        listings.clear();
+        QTRY_VERIFY_WITH_TIMEOUT(!listings.isEmpty(), 4500);
+        QVERIFY(button->text().contains(QStringLiteral("开")));
+
+        QTest::mouseClick(button, Qt::LeftButton);
+        QVERIFY(!button->isChecked());
+        QVERIFY(button->text().contains(QStringLiteral("关")));
+        listings.clear();
+        QVERIFY2(backend->writeFile(remoteFile, content, &error), qPrintable(error));
+        QTest::qWait(2300);
+        QVERIFY(listings.isEmpty());
+        QVERIFY(!entry(m_remote, QStringLiteral("automatic-refresh.txt")).isValid());
+        QTest::mouseClick(button, Qt::LeftButton);
+        QTRY_VERIFY_WITH_TIMEOUT(entry(m_remote, QStringLiteral("automatic-refresh.txt")).isValid(), 1500);
+        QTest::mouseClick(button, Qt::LeftButton);
+        QVERIFY2(backend->removeFile(remoteFile, &error), qPrintable(error));
     }
 
     void dragUploadAndDownload()
@@ -176,23 +241,6 @@ private slots:
         QFile downloaded(target);
         QVERIFY(downloaded.open(QIODevice::ReadOnly));
         QCOMPARE(downloaded.readAll(), contents);
-    }
-
-    void synchronizationWaitsForPrompt()
-    {
-        QSignalSpy directories(m_panel, &TerminalPanel::directoryChanged);
-        command("cd /home/test");
-        QTRY_COMPARE_WITH_TIMEOUT(m_remote->currentPath(), QStringLiteral("/home/test"), 10000);
-        auto *terminal = m_panel->findChild<TerminalWidget *>();
-        QTest::keyClicks(terminal, QStringLiteral("printf typed"));
-        directories.clear();
-        m_remote->navigateRemote(QStringLiteral("/home/test/navigation"));
-        QTRY_COMPARE_WITH_TIMEOUT(m_remote->currentPath(), QStringLiteral("/home/test/navigation"), 10000);
-        QTest::qWait(100);
-        QVERIFY(!reported(directories, QStringLiteral("/home/test/navigation")));
-        QTest::keyClick(terminal, Qt::Key_U, Qt::ControlModifier);
-        QTest::keyClick(terminal, Qt::Key_Return);
-        QTRY_VERIFY_WITH_TIMEOUT(reported(directories, QStringLiteral("/home/test/navigation")), 10000);
     }
 
     void remoteOpenCache()
@@ -329,6 +377,22 @@ private slots:
             QVERIFY(!action->text().contains(QStringLiteral("关于")));
     }
 
+    void automaticRefreshWithoutTerminal()
+    {
+        QCOMPARE(m_panel->terminalCount(), 0);
+        auto backend = createBackend(ftp.protocol);
+        QString error;
+        QVERIFY2(backend->connect(ftp, &error), qPrintable(error));
+        auto *button = m_remote->findChild<QToolButton *>(QStringLiteral("AutoRefreshButton"));
+        button->setChecked(true);
+        const QByteArray content("FTP automatic refresh without an SSH terminal");
+        QVERIFY2(backend->writeFile(QStringLiteral("/ftp-auto-refresh.txt"), content, &error), qPrintable(error));
+        QTRY_COMPARE_WITH_TIMEOUT(entry(m_remote, QStringLiteral("ftp-auto-refresh.txt")).size, content.size(), 4500);
+        QVERIFY2(backend->removeFile(QStringLiteral("/ftp-auto-refresh.txt"), &error), qPrintable(error));
+        QTRY_VERIFY_WITH_TIMEOUT(!entry(m_remote, QStringLiteral("ftp-auto-refresh.txt")).isValid(), 4500);
+        button->setChecked(false);
+    }
+
     void cleanupTestCase()
     {
         QDesktopServices::unsetUrlHandler(QStringLiteral("file"));
@@ -342,10 +406,6 @@ private:
         terminal->setFocus();
         QTest::keyClicks(terminal, QString::fromLatin1(text));
         QTest::keyClick(terminal, Qt::Key_Return);
-    }
-    static bool reported(const QSignalSpy &spy, const QString &directory)
-    {
-        return std::any_of(spy.begin(), spy.end(), [&](const auto &args) { return args.first().toString() == directory; });
     }
     static FileInfo entry(FilePane *pane, const QString &name)
     {

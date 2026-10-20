@@ -4,7 +4,7 @@ param(
     [string]$Configuration = "Debug",
     [string]$QtRoot = $env:DBGATE_QT_ROOT,
     [string]$VcpkgRoot = $env:VCPKG_ROOT,
-    [string]$PackageName = "WinSCPQt-floating-win64"
+    [string]$PackageName = "WinSCPQt-refresh-win64"
 )
 
 $ErrorActionPreference = "Stop"

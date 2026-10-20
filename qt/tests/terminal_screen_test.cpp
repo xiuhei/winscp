@@ -18,22 +18,8 @@ private slots:
     void resizePreservesContent();
     void alternateScreen();
     void titleAndResponses();
-    void workingDirectories();
     void wrapping();
 };
-
-void TerminalScreenTest::workingDirectories()
-{
-    TerminalScreen screen;
-    screen.feed(QStringLiteral("\x1b]7;file://server/home/user/a%20b%23%25"));
-    QVERIFY(screen.takeWorkingDirectories().isEmpty());
-    screen.feed(QStringLiteral("\x1b\\"));
-    QCOMPARE(screen.takeWorkingDirectories(), QStringList{QStringLiteral("/home/user/a b#%")});
-    screen.feed(QStringLiteral("\x1b]777;winscp-cwd;/中文/space ' % dir\x07"));
-    QCOMPARE(screen.takeWorkingDirectories(), QStringList{QStringLiteral("/中文/space ' % dir")});
-    screen.feed(QStringLiteral("\x1b]7;https://server/path\x07"));
-    QVERIFY(screen.takeWorkingDirectories().isEmpty());
-}
 
 void TerminalScreenTest::basicText()
 {

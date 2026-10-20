@@ -494,9 +494,7 @@ void MainWindow::connectSignals()
             showStatus(message, true);
         });
         connect(pane, &FilePane::selectionChanged, this, &MainWindow::updateActions);
-        connect(pane, &FilePane::pathChanged, this, [this](const QString &directory, bool remote) {
-            if (remote)
-                m_terminalPanel->synchronizeToDirectory(directory);
+        connect(pane, &FilePane::pathChanged, this, [this](const QString &, bool) {
             if (m_connected && !m_demo)
                 Settings::instance().rememberDirectories(m_session, m_localPane->currentPath(), m_remotePane->currentPath());
             updateTitle();
@@ -536,10 +534,6 @@ void MainWindow::connectSignals()
             &MainWindow::onSymlinkCreated);
     connect(m_remoteFs, &FileSystemController::busyChanged, this, [this](bool) { updateActions(); });
 
-    connect(m_terminalPanel, &TerminalPanel::directoryChanged, this, [this](const QString &directory) {
-        if (m_connected && directory != m_remotePane->currentPath())
-            m_remotePane->navigateRemote(directory);
-    });
     connect(m_fileOpener, &RemoteFileOpener::statusMessage, this,
             [this](const QString &message) { showStatus(message, true); });
     connect(m_terminalPanel, &TerminalPanel::connectRequested, this, [this] {

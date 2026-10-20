@@ -15,6 +15,7 @@ class QPushButton;
 class QStackedWidget;
 class QTableView;
 class QToolButton;
+class QTimer;
 class QUrl;
 
 namespace wsc {
@@ -105,6 +106,7 @@ private:
     void buildWelcomePage();
     void applyRoleStyle();
     void updateNavigationButtons();
+    void updateAutoRefreshButton();
     void updateStatus();
     void updateEmptyState();
     void updateHeader();
@@ -128,6 +130,9 @@ private:
     QLabel *m_breadcrumbs = nullptr;
     QStackedWidget *m_pathStack = nullptr;
     QToolButton *m_autoRefreshButton = nullptr;
+    QTimer *m_autoRefreshTimer = nullptr;
+    QDateTime m_lastRemoteRefresh;
+    QString m_refreshError;
     QComboBox *m_pathCombo = nullptr;
     QToolButton *m_backButton = nullptr;
     QToolButton *m_forwardButton = nullptr;
