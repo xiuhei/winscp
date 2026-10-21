@@ -35,7 +35,7 @@ public:
     void enableDemoMode();
     void newSession();
     SessionData session() const { return m_session; }
-    bool hasConnection() const { return m_connected || m_connecting; }
+    bool hasConnection() const;
     QToolBar *toolBar() const { return m_toolBar; }
     void applyPreferences();
     void activate();

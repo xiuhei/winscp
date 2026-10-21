@@ -143,6 +143,11 @@ SessionWorkspace::~SessionWorkspace()
     shutdown();
 }
 
+bool SessionWorkspace::hasConnection() const
+{
+    return m_demo || m_remoteFs->isConnected() || m_remoteFs->isConnecting();
+}
+
 void SessionWorkspace::buildActions()
 {
     auto makeAction = [this](const QString &text, const QString &icon, const QKeySequence &shortcut = {},

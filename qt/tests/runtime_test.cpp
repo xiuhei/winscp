@@ -363,6 +363,25 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(firstFiles->currentPath(), QStringLiteral("/still-connected"), 5000);
     }
 
+    void immediateReconnectReusesDisconnectedTab()
+    {
+        HttpFixture server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        MainWindow window;
+        auto session = server.session();
+        session.password = QStringLiteral("test");
+        window.setInitialSession(session, true);
+        auto *view = window.activeWorkspace();
+        auto *files = view->findChild<FileSystemController *>();
+        QTRY_COMPARE_WITH_TIMEOUT(files->currentPath(), QStringLiteral("/"), 5000);
+        files->disconnectFromHost();
+        window.setInitialSession(session, true);
+        QCOMPARE(window.activeWorkspace(), view);
+        QCOMPARE(window.findChild<QTabBar *>(QStringLiteral("SessionTabs"))->count(), 2);
+        QTRY_VERIFY_WITH_TIMEOUT(files->isConnected(), 5000);
+        QTRY_COMPARE_WITH_TIMEOUT(files->currentPath(), QStringLiteral("/"), 5000);
+    }
+
     void replacePendingConnection()
     {
         HttpFixture server;
