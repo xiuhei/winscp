@@ -8,6 +8,11 @@
 #include "ui/Theme.h"
 #include "ui/TextEditorDialog.h"
 #include "ui/MainWindow.h"
+#include "ui/SessionWorkspace.h"
+#include "core/FileSystemController.h"
+#include "transfer/TransferManager.h"
+#include "transfer/TransferQueueModel.h"
+#include "proto/LocalBackend.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -20,9 +25,11 @@
 #include <QPushButton>
 #include <QPlainTextEdit>
 #include <QScrollBar>
+#include <QScopeGuard>
 #include <QSpinBox>
 #include <QStyleFactory>
 #include <QTableView>
+#include <QTabBar>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QtTest>
@@ -270,6 +277,156 @@ private slots:
         local->externalFilesDropped({QUrl::fromLocalFile(tree)}, nested, false);
         QVERIFY(!QFileInfo::exists(QDir(nested).filePath(QStringLiteral("tree"))));
         QCOMPARE(warnings, 2);
+    }
+
+    void sessionTabsKeepViewsAndShareTransfers()
+    {
+        const bool showLogin = Settings::instance().showLoginDialog;
+        const auto restore = qScopeGuard([&] { Settings::instance().showLoginDialog = showLogin; });
+        Settings::instance().showLoginDialog = false;
+        MainWindow window;
+        window.show();
+        auto *tabs = window.findChild<QTabBar *>(QStringLiteral("SessionTabs"));
+        QVERIFY(tabs);
+        QCOMPARE(tabs->count(), 1);
+        QCOMPARE(tabs->tabText(0), QString());
+        QVERIFY(!tabs->tabButton(0, QTabBar::RightSide));
+        SessionData first;
+        first.siteName = QStringLiteral("生产服务器");
+        first.hostName = QStringLiteral("first.example");
+        window.setInitialSession(first, false);
+        auto *firstView = window.activeWorkspace();
+        SessionData second = first;
+        second.siteName = QStringLiteral("测试服务器");
+        second.hostName = QStringLiteral("second.example");
+        window.setInitialSession(second, false);
+        QPointer<SessionWorkspace> secondView = window.activeWorkspace();
+        QVERIFY(firstView != secondView);
+        QCOMPARE(tabs->count(), 3);
+        QCOMPARE(tabs->tabText(0), first.siteName);
+        QCOMPARE(tabs->tabText(1), second.siteName);
+        QCOMPARE(tabs->tabText(2), QString());
+        QVERIFY(!tabs->tabButton(2, QTabBar::RightSide));
+        QCOMPARE(window.findChildren<TransferManager *>().size(), 1);
+        QCOMPARE(window.findChildren<QDialog *>(QStringLiteral("TransferQueueWindow")).size(), 1);
+        QCOMPARE(window.findChildren<FileSystemController *>().size(), 2);
+        tabs->setCurrentIndex(0);
+        QCOMPARE(window.activeWorkspace(), firstView);
+        QVERIFY(firstView->isVisible());
+        QVERIFY(!secondView->isVisible());
+        tabs->tabCloseRequested(1);
+        QTRY_VERIFY(secondView.isNull());
+        QCOMPARE(window.activeWorkspace(), firstView);
+        QCOMPARE(tabs->count(), 2);
+        tabs->tabCloseRequested(0);
+        QCOMPARE(tabs->count(), 1);
+        QCOMPARE(tabs->tabText(0), QString());
+        QVERIFY(window.activeWorkspace());
+        QVERIFY(window.activeWorkspace()->session().hostName.isEmpty());
+    }
+
+    void blankSessionTabOpensLoginWithoutLosingSelection()
+    {
+        MainWindow window;
+        window.show();
+        auto *tabs = window.findChild<QTabBar *>(QStringLiteral("SessionTabs"));
+        int shown = 0;
+        QTimer dismiss;
+        connect(&dismiss, &QTimer::timeout, &window, [&] {
+            auto *login = window.findChild<LoginDialog *>();
+            if (login && login->isVisible()) {
+                ++shown;
+                login->reject();
+            }
+        });
+        dismiss.start(10);
+        QTest::mouseClick(tabs, Qt::LeftButton, Qt::NoModifier, tabs->tabRect(0).center());
+        QTRY_COMPARE(shown, 1);
+        QCOMPARE(tabs->count(), 1);
+        SessionData first;
+        first.hostName = QStringLiteral("first.example");
+        window.setInitialSession(first, false);
+        auto *view = window.activeWorkspace();
+        QTest::mouseClick(tabs, Qt::LeftButton, Qt::NoModifier, tabs->tabRect(1).center());
+        QTRY_COMPARE(shown, 2);
+        QTest::qWait(50);
+        QCOMPARE(shown, 2);
+        QCOMPARE(tabs->count(), 2);
+        QCOMPARE(tabs->currentIndex(), 0);
+        QCOMPARE(window.activeWorkspace(), view);
+    }
+
+    void closingSessionDoesNotStopSharedTransfer()
+    {
+        const bool showLogin = Settings::instance().showLoginDialog;
+        const auto restoreLogin = qScopeGuard([&] { Settings::instance().showLoginDialog = showLogin; });
+        Settings::instance().showLoginDialog = false;
+        MainWindow window;
+        SessionData session;
+        session.hostName = QStringLiteral("first.example");
+        window.setInitialSession(session, false);
+        QPointer<SessionWorkspace> view = window.activeWorkspace();
+        auto *tabs = window.findChild<QTabBar *>(QStringLiteral("SessionTabs"));
+        auto *transfers = window.findChild<TransferManager *>();
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString source = directory.filePath(QStringLiteral("payload.txt"));
+        const QString targetDirectory = directory.filePath(QStringLiteral("target"));
+        QVERIFY(QDir().mkpath(targetDirectory));
+        LocalBackend files;
+        QString error;
+        const QByteArray payload("transfer survives closing its session tab");
+        QVERIFY(files.writeFile(source, payload, &error));
+        const QString target = QDir(targetDirectory).filePath(QStringLiteral("payload.txt"));
+        QVERIFY(files.writeFile(target, "original", &error));
+        const QString policy = Settings::instance().conflictPolicy;
+        const auto restore = qScopeGuard([&] { Settings::instance().conflictPolicy = policy; });
+        Settings::instance().conflictPolicy = QStringLiteral("ask");
+        bool closed = false;
+        transfers->setConflictResolver([&](const QString &, TransferDirection, qint64, qint64) {
+            tabs->tabCloseRequested(0);
+            closed = true;
+            return ConflictAction::Overwrite;
+        });
+        QSignalSpy finished(transfers, &TransferManager::allTransfersFinished);
+        transfers->enqueueDownload(SessionData::localSession(), {LocalBackend::infoForPath(source)}, targetDirectory);
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 5000);
+        QVERIFY(closed);
+        QTRY_VERIFY(view.isNull());
+        QCOMPARE(transfers->model()->rows().last().status, TransferStatus::Completed);
+        QByteArray actual;
+        QVERIFY(files.readFile(target, &actual, &error));
+        QCOMPARE(actual, payload);
+        QCOMPARE(window.findChildren<QDialog *>(QStringLiteral("TransferQueueWindow")).size(), 1);
+    }
+
+    void closingLastSessionHonorsLoginPreference()
+    {
+        const bool showLogin = Settings::instance().showLoginDialog;
+        const auto restore = qScopeGuard([&] { Settings::instance().showLoginDialog = showLogin; });
+        Settings::instance().showLoginDialog = true;
+        MainWindow window;
+        window.show();
+        SessionData session;
+        session.hostName = QStringLiteral("first.example");
+        window.setInitialSession(session, false);
+        auto *tabs = window.findChild<QTabBar *>(QStringLiteral("SessionTabs"));
+        int shown = 0;
+        QTimer dismiss;
+        connect(&dismiss, &QTimer::timeout, &window, [&] {
+            auto *login = window.findChild<LoginDialog *>();
+            if (login && login->isVisible()) {
+                ++shown;
+                login->reject();
+            }
+        });
+        dismiss.start(10);
+        tabs->tabCloseRequested(0);
+        QTRY_COMPARE(shown, 1);
+        QCOMPARE(tabs->count(), 1);
+        QVERIFY(tabs->tabText(0).isEmpty());
+        QTest::qWait(50);
+        QCOMPARE(shown, 1);
     }
 
     void iconsFollowTheme()

@@ -6,6 +6,10 @@
 #include "terminal/SshShellSession.h"
 #include "ui/FilePane.h"
 #include "ui/FileTableModel.h"
+#include "ui/MainWindow.h"
+#include "ui/SessionWorkspace.h"
+#include "ui/LoginDialog.h"
+#include "ui/SessionEditor.h"
 #include "proto/LocalBackend.h"
 #include "transfer/TransferManager.h"
 #include "transfer/TransferQueueModel.h"
@@ -19,6 +23,7 @@
 #include <QTemporaryDir>
 #include <QThread>
 #include <QTimer>
+#include <QTabBar>
 #include <QtTest>
 
 using namespace wsc;
@@ -305,6 +310,57 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(files.currentPath(), QStringLiteral("/ spaced "), 5000);
         pane.navigateRemote(QStringLiteral("/a\\b"));
         QTRY_COMPARE_WITH_TIMEOUT(files.currentPath(), QStringLiteral("/a\\b"), 5000);
+    }
+
+    void sessionTabsKeepConnectionsAndDirectories()
+    {
+        HttpFixture firstServer;
+        HttpFixture secondServer;
+        QVERIFY(firstServer.listen(QHostAddress::LocalHost));
+        QVERIFY(secondServer.listen(QHostAddress::LocalHost));
+        MainWindow window;
+        window.show();
+        auto first = firstServer.session();
+        first.password = QStringLiteral("test");
+        first.remoteDirectory = QStringLiteral("/first");
+        window.setInitialSession(first, true);
+        auto *firstView = window.activeWorkspace();
+        auto *firstFiles = firstView->findChild<FileSystemController *>();
+        QTRY_COMPARE_WITH_TIMEOUT(firstFiles->currentPath(), QStringLiteral("/first"), 5000);
+        auto second = secondServer.session();
+        second.remoteDirectory = QStringLiteral("/second");
+        int logins = 0;
+        QTimer loginTimer;
+        connect(&loginTimer, &QTimer::timeout, &window, [&] {
+            auto *login = window.findChild<LoginDialog *>();
+            if (!login || !login->isVisible())
+                return;
+            ++logins;
+            login->findChild<SessionEditor *>()->setSession(second);
+            QMetaObject::invokeMethod(login, "accept");
+        });
+        loginTimer.start(10);
+        auto *tabs = window.findChild<QTabBar *>(QStringLiteral("SessionTabs"));
+        QTest::mouseClick(tabs, Qt::LeftButton, Qt::NoModifier, tabs->tabRect(tabs->count() - 1).center());
+        QTRY_COMPARE_WITH_TIMEOUT(logins, 1, 5000);
+        loginTimer.stop();
+        auto *secondView = window.activeWorkspace();
+        QVERIFY(secondView != firstView);
+        QPointer<FileSystemController> secondFiles = secondView->findChild<FileSystemController *>();
+        QTRY_COMPARE_WITH_TIMEOUT(secondFiles->currentPath(), QStringLiteral("/second"), 5000);
+        QVERIFY(firstFiles->isConnected());
+        firstFiles->listDirectory(QStringLiteral("/background"));
+        QTRY_COMPARE_WITH_TIMEOUT(firstFiles->currentPath(), QStringLiteral("/background"), 5000);
+        QCOMPARE(secondFiles->currentPath(), QStringLiteral("/second"));
+        tabs->setCurrentIndex(0);
+        QCOMPARE(window.activeWorkspace(), firstView);
+        QVERIFY(firstFiles->isConnected());
+        QVERIFY(secondFiles->isConnected());
+        tabs->tabCloseRequested(1);
+        QTRY_VERIFY_WITH_TIMEOUT(secondFiles.isNull(), 5000);
+        QVERIFY(firstFiles->isConnected());
+        firstFiles->listDirectory(QStringLiteral("/still-connected"));
+        QTRY_COMPARE_WITH_TIMEOUT(firstFiles->currentPath(), QStringLiteral("/still-connected"), 5000);
     }
 
     void replacePendingConnection()

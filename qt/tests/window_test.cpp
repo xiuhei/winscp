@@ -11,6 +11,7 @@
 #include "ui/FileTableModel.h"
 #include "terminal/TerminalWidget.h"
 #include "ui/MainWindow.h"
+#include "ui/SessionWorkspace.h"
 #include "ui/TerminalPanel.h"
 
 #include <QAction>
@@ -37,6 +38,7 @@
 #include <QScrollBar>
 #include <QSaveFile>
 #include <QTableView>
+#include <QTabBar>
 #include <QTemporaryDir>
 #include <QToolButton>
 #include <QTextDocument>
@@ -554,20 +556,42 @@ private slots:
 
     void switchToNonSshSession()
     {
-        QTimer answer;
-        connect(&answer, &QTimer::timeout, this, [] {
-            for (auto *widget : QApplication::topLevelWidgets()) {
-                auto *box = qobject_cast<QMessageBox *>(widget);
-                if (box && box->isVisible()) {
-                    if (auto *yes = box->button(QMessageBox::Yes))
-                        yes->click();
-                }
-            }
-        });
-        answer.start(20);
+        auto *sshFiles = m_fs;
+        auto *sshPanel = m_panel;
+        auto *sshView = m_window->activeWorkspace();
         m_window->setInitialSession(ftp, true);
+        auto *ftpView = m_window->activeWorkspace();
+        QVERIFY(ftpView != sshView);
+        m_fs = ftpView->findChild<FileSystemController *>();
+        m_panel = ftpView->findChild<TerminalPanel *>();
+        for (auto *pane : ftpView->findChildren<FilePane *>()) {
+            if (pane->isRemote())
+                m_remote = pane;
+            else
+                m_local = pane;
+        }
         QTRY_VERIFY_WITH_TIMEOUT(m_fs->isConnected() && m_fs->protocol() == Protocol::Ftp, 20000);
         QCOMPARE(m_panel->terminalCount(), 0);
+        QVERIFY(sshFiles->isConnected());
+        QCOMPARE(sshPanel->terminalCount(), 1);
+        auto *tabs = m_window->findChild<QTabBar *>(QStringLiteral("SessionTabs"));
+        QCOMPARE(tabs->count(), 3);
+        tabs->setCurrentIndex(0);
+        QCOMPARE(m_window->activeWorkspace(), sshView);
+        auto *terminal = sshPanel->findChild<TerminalWidget *>();
+        QTRY_VERIFY_WITH_TIMEOUT(terminal->isSessionRunning(), 10000);
+        const QString text = QStringLiteral("SESSION_TAB_TERMINAL_OK");
+        terminal->setFocus();
+        QTest::keyClicks(terminal, QStringLiteral("echo ") + text);
+        QTest::keyClick(terminal, Qt::Key_Return);
+        QTRY_VERIFY_WITH_TIMEOUT(terminal->screen()->textRange(0, 0, terminal->screen()->totalLines() - 1,
+            terminal->screen()->columns()).contains(QLatin1Char('\n') + text + QLatin1Char('\n')), 10000);
+        tabs->setCurrentIndex(1);
+        QCOMPARE(m_window->activeWorkspace(), ftpView);
+        tabs->tabCloseRequested(0);
+        QCOMPARE(m_window->activeWorkspace(), ftpView);
+        QVERIFY(m_fs->isConnected());
+        QCOMPARE(m_window->findChildren<QDialog *>(QStringLiteral("TransferQueueWindow")).size(), 1);
         for (auto *action : m_window->findChildren<QAction *>())
             QVERIFY(!action->text().contains(QStringLiteral("关于")));
     }
