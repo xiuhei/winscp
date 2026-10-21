@@ -703,10 +703,13 @@ void SessionWorkspace::showTextEditor(const QString &path, const QByteArray &dat
                                  QStringLiteral("内置编辑器支持不超过 32 MB 的文本。"));
         return;
     }
-    QStringDecoder decoder(QStringDecoder::Utf8, QStringConverter::Flag::Stateless);
-    const QString decoded = decoder.decode(data);
-    Q_UNUSED(decoded);
-    if (data.contains('\0') || decoder.hasError()) {
+    bool invalidText;
+    {
+        QStringDecoder decoder(QStringDecoder::Utf8, QStringConverter::Flag::Stateless);
+        const QString decoded = decoder.decode(data);
+        invalidText = decoded.contains(QChar::Null) || decoder.hasError();
+    }
+    if (invalidText) {
         QMessageBox::information(this, QStringLiteral("无法编辑"),
                                  QStringLiteral("内置编辑器仅支持 UTF-8 文本，无法编辑该文件。"));
         return;

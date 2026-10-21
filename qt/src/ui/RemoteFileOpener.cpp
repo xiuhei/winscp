@@ -253,9 +253,13 @@ void RemoteFileOpener::openLocal(const QString &localPath, const QString &remote
             return;
         }
         const QByteArray data = file.readAll();
-        QStringDecoder decoder(QStringDecoder::Utf8, QStringConverter::Flag::Stateless);
-        const QString decoded = decoder.decode(data);
-        if (decoder.hasError() || decoded.contains(QChar::Null)) {
+        bool invalidText;
+        {
+            QStringDecoder decoder(QStringDecoder::Utf8, QStringConverter::Flag::Stateless);
+            const QString decoded = decoder.decode(data);
+            invalidText = decoder.hasError() || decoded.contains(QChar::Null);
+        }
+        if (invalidText) {
             QMessageBox::information(m_parent, QStringLiteral("无法编辑"),
                 QStringLiteral("该文件不是有效的 UTF-8 文本。文件已下载到：\n%1").arg(localPath));
             return;

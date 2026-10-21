@@ -7,6 +7,7 @@
 #include "ui/Theme.h"
 
 #include <QAction>
+#include <QByteArrayView>
 #include <QDialogButtonBox>
 #include <QFontDatabase>
 #include <QHBoxLayout>
@@ -36,11 +37,11 @@ TextEditorDialog::TextEditorDialog(const QString &remotePath, const QByteArray &
     resize(900, 680);
     setMinimumSize(560, 400);
 
-    QByteArray textData = data;
+    QByteArrayView textData(data);
     m_crlf = data.contains("\r\n");
-    if (textData.startsWith("\xEF\xBB\xBF")) {
+    if (data.startsWith("\xEF\xBB\xBF")) {
         m_hasBom = true;
-        textData.remove(0, 3);
+        textData = textData.sliced(3);
     }
 
     auto *layout = new QVBoxLayout(this);

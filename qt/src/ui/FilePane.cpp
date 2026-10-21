@@ -918,7 +918,7 @@ void FilePane::loadLocalDirectory(const QString &pathValue, bool addToHistory)
     };
     auto *watcher = new QFutureWatcher<Listing>(this);
     connect(watcher, &QFutureWatcher<Listing>::finished, this, [this, watcher, latest, request, addToHistory] {
-        const Listing result = watcher->result();
+        Listing result = watcher->future().takeResult();
         watcher->deleteLater();
         if (latest->load() != request)
             return;
@@ -930,7 +930,7 @@ void FilePane::loadLocalDirectory(const QString &pathValue, bool addToHistory)
         }
         m_localPath = result.path;
         m_storageStatus = result.storage;
-        m_model->setEntries(withParent(result.entries, m_localPath, false));
+        m_model->setEntries(withParent(std::move(result.entries), m_localPath, false));
         m_table->clearSelection();
         m_table->setCurrentIndex(QModelIndex());
         m_stack->setCurrentIndex(0);
