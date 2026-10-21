@@ -40,6 +40,7 @@ struct TerminalCell {
 };
 
 struct TerminalLine {
+    // Scrollback omits trailing default cells; missing cells are blank.
     QVector<TerminalCell> cells;
     bool wrapped = false;
 };
@@ -115,6 +116,7 @@ private:
 
     TerminalLine blankLine(bool useCurrentBackground = false) const;
     TerminalCell blankCell(bool useCurrentBackground = false) const;
+    void appendScrollback(TerminalLine line);
     void trimScrollback();
     void ensureLineWidth(TerminalLine *line);
     void putCharacter(const QString &text, int width);

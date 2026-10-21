@@ -48,6 +48,43 @@ private slots:
         Theme::apply(QStringLiteral("light"));
     }
 
+    void directoryRefreshPreservesRows()
+    {
+        FileInfo removed;
+        removed.name = QStringLiteral("removed");
+        removed.path = QStringLiteral("/removed");
+        FileInfo changed;
+        changed.name = QStringLiteral("changed");
+        changed.path = QStringLiteral("/changed");
+        FileInfo unchanged;
+        unchanged.name = QStringLiteral("unchanged");
+        unchanged.path = QStringLiteral("/unchanged");
+        FileInfo added;
+        added.name = QStringLiteral("added");
+        added.path = QStringLiteral("/added");
+        FileTableModel model(false);
+        model.setEntries({removed, changed, unchanged});
+        const QPersistentModelIndex retained(model.index(2, 0));
+        QSignalSpy reset(&model, &QAbstractItemModel::modelReset);
+        QSignalSpy updates(&model, &QAbstractItemModel::dataChanged);
+        changed.size = 123;
+        model.updateEntries({added, unchanged, changed});
+        QCOMPARE(model.rowCount(), 3);
+        QCOMPARE(model.entryAt(0), changed);
+        QCOMPARE(model.entryAt(1), unchanged);
+        QCOMPARE(model.entryAt(2), added);
+        QVERIFY(retained.isValid());
+        QCOMPARE(retained.row(), 1);
+        QCOMPARE(retained.data().toString(), unchanged.name);
+        QCOMPARE(updates.size(), 1);
+        QVERIFY(reset.isEmpty());
+        model.updateEntries({added, unchanged, changed});
+        QCOMPARE(updates.size(), 1);
+        model.updateEntries({});
+        QCOMPARE(model.rowCount(), 0);
+        QVERIFY(!retained.isValid());
+    }
+
     void sessionConfigurationRoundTrip()
     {
         SessionData session;

@@ -25,9 +25,10 @@ void FileTableModel::setEntries(const FileList &entries)
 
 void FileTableModel::updateEntries(const FileList &entries)
 {
-    QHash<QString, FileInfo> remaining;
-    for (const auto &entry : entries)
-        remaining.insert(entry.path, entry);
+    QHash<QString, qsizetype> remaining;
+    remaining.reserve(entries.size());
+    for (qsizetype row = 0; row < entries.size(); ++row)
+        remaining.insert(entries.at(row).path, row);
     for (int row = m_entries.size() - 1; row >= 0; --row) {
         if (!remaining.contains(m_entries.at(row).path)) {
             beginRemoveRows({}, row, row);
@@ -36,7 +37,7 @@ void FileTableModel::updateEntries(const FileList &entries)
         }
     }
     for (int row = 0; row < m_entries.size(); ++row) {
-        const FileInfo updated = remaining.take(m_entries.at(row).path);
+        const FileInfo &updated = entries.at(remaining.take(m_entries.at(row).path));
         if (m_entries.at(row) != updated) {
             m_entries[row] = updated;
             emit dataChanged(index(row, 0), index(row, ColumnCount - 1));

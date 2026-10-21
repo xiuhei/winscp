@@ -3,12 +3,27 @@
 #include <QStringList>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <utility>
 
 namespace wsc {
 
 namespace {
+
+QString characterText(QChar character)
+{
+    static const auto latin1 = [] {
+        std::array<QChar, 256> characters;
+        for (size_t index = 0; index < characters.size(); ++index)
+            characters[index] = QChar(static_cast<char16_t>(index));
+        return characters;
+    }();
+    // The backing storage must outlive every screen and shared cell string.
+    if (character.unicode() < latin1.size())
+        return QString::fromRawData(latin1.data() + character.unicode(), 1);
+    return QString(character);
+}
 
 int codepointWidth(uint ucs4)
 {
@@ -70,6 +85,7 @@ void TerminalScreen::setPalette(const TerminalPalette &palette)
 
 void TerminalScreen::reset()
 {
+    m_mainLines = {};
     m_lines.clear();
     m_lines.reserve(m_rows);
     for (int row = 0; row < m_rows; ++row)
@@ -175,7 +191,7 @@ void TerminalScreen::setSize(int columns, int rows)
                 m_lines.removeLast();
         } else {
             while (m_lines.size() > m_rows) {
-                m_scrollback.append(m_lines.takeFirst());
+                appendScrollback(m_lines.takeFirst());
                 if (m_cursorRow > 0)
                     --m_cursorRow;
             }
@@ -204,6 +220,21 @@ void TerminalScreen::setSize(int columns, int rows)
     Q_UNUSED(oldRows);
 }
 
+void TerminalScreen::appendScrollback(TerminalLine line)
+{
+    qsizetype size = line.cells.size();
+    while (size > 0) {
+        const TerminalCell &cell = line.cells.at(size - 1);
+        if (!cell.text.isEmpty() || !cell.foreground.isDefault() ||
+            !cell.background.isDefault() || cell.attributes != 0 || cell.continuation)
+            break;
+        --size;
+    }
+    line.cells.resize(size);
+    line.cells.squeeze();
+    m_scrollback.append(std::move(line));
+}
+
 void TerminalScreen::trimScrollback()
 {
     while (m_scrollback.size() > m_scrollbackLimit)
@@ -227,8 +258,12 @@ TerminalLine &TerminalScreen::mutableLineAt(int absoluteIndex)
 {
     if (absoluteIndex < 0)
         absoluteIndex = 0;
-    if (absoluteIndex < m_scrollback.size())
-        return m_scrollback[absoluteIndex];
+    if (absoluteIndex < m_scrollback.size()) {
+        TerminalLine &line = m_scrollback[absoluteIndex];
+        if (line.cells.size() < m_columns)
+            line.cells.resize(m_columns);
+        return line;
+    }
     int row = absoluteIndex - m_scrollback.size();
     if (row >= m_lines.size()) {
         row = m_lines.size() - 1;
@@ -241,7 +276,7 @@ void TerminalScreen::feed(const QString &text)
     for (int index = 0; index < text.size(); ++index) {
         QChar character = text.at(index);
         uint codepoint = character.unicode();
-        QString grapheme(character);
+        QString grapheme = characterText(character);
         if (character.isHighSurrogate() && index + 1 < text.size() &&
             text.at(index + 1).isLowSurrogate()) {
             const char16_t pair[] = {character.unicode(), text.at(index + 1).unicode(), 0};
@@ -576,7 +611,7 @@ void TerminalScreen::scrollUp(int count)
         TerminalLine removed = m_lines.takeAt(m_scrollTop);
         m_lines.insert(m_scrollBottom, blankLine());
         if (m_scrollTop == 0 && m_scrollBottom == m_rows - 1 && !m_alternateScreen) {
-            m_scrollback.append(removed);
+            appendScrollback(std::move(removed));
             trimScrollback();
         }
     }
@@ -795,7 +830,7 @@ void TerminalScreen::leaveAlternateScreen()
     if (!m_alternateScreen)
         return;
     m_alternateScreen = false;
-    m_lines = m_mainLines;
+    m_lines = std::move(m_mainLines);
     m_cursorRow = m_mainCursorRow;
     m_cursorColumn = m_mainCursorColumn;
     m_currentForeground = m_mainForeground;

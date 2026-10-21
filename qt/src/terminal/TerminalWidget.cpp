@@ -225,10 +225,9 @@ void TerminalWidget::paintEvent(QPaintEvent *event)
         const qreal baseline = y + m_ascent;
 
         // Backgrounds (including selection and reverse video).
+        const TerminalCell blank;
         for (int column = 0; column < columns; ++column) {
-            if (column >= line.cells.size())
-                break;
-            const TerminalCell &cell = line.cells.at(column);
+            const TerminalCell &cell = column < line.cells.size() ? line.cells.at(column) : blank;
             if (cell.continuation && !cellSelected(absoluteLine, column))
                 continue;
             QColor background = m_screen.colorFor(cell.background, false, true);

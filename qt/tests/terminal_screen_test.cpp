@@ -20,7 +20,83 @@ private slots:
     void titleAndResponses();
     void wrapping();
     void oversizedEscapeSequences();
+    void compactScrollback();
+    void styledScrollback();
+    void sharedCharacterStorage();
+    void resizeMovesLinesToScrollback();
 };
+
+void TerminalScreenTest::compactScrollback()
+{
+    TerminalScreen screen(160, 2);
+    screen.setScrollbackLimit(100);
+    for (int index = 0; index < 110; ++index)
+        screen.feed(QString::number(index) + QStringLiteral("\r\n"));
+    QCOMPARE(screen.scrollbackCount(), 100);
+    QCOMPARE(screen.lineText(0), QStringLiteral("9"));
+    QCOMPARE(screen.lineText(99), QStringLiteral("108"));
+    QCOMPARE(screen.textRange(98, 0, 99, 159), QStringLiteral("107\n108"));
+    for (int row = 0; row < screen.scrollbackCount(); ++row) {
+        const auto &cells = screen.lineAt(row).cells;
+        QVERIFY(cells.capacity() <= 3);
+    }
+    screen.setSize(80, 2);
+    QCOMPARE(screen.lineText(0), QStringLiteral("9"));
+    auto &line = screen.mutableLineAt(0);
+    QCOMPARE(line.cells.size(), 80);
+    line.cells[79].text = QStringLiteral("!");
+    QCOMPARE(screen.lineText(0).size(), 80);
+    screen.clearScrollback();
+    QCOMPARE(screen.scrollbackCount(), 0);
+}
+
+void TerminalScreenTest::styledScrollback()
+{
+    TerminalScreen screen(10, 2);
+    screen.feed(QStringLiteral("\x1b[44m\x1b[2K\x1b[0m\r\n\r\n"));
+    QCOMPARE(screen.lineAt(0).cells.size(), 10);
+    QCOMPARE(screen.lineAt(0).cells.at(9).background.index(), 4);
+    screen.feed(QStringLiteral("\r\n"));
+    QVERIFY(screen.lineAt(1).cells.isEmpty());
+    QCOMPARE(screen.textRange(0, 0, 1, 9), QStringLiteral("\n"));
+
+    screen.feed(QStringLiteral("你好\r\n\r\n"));
+    const int row = screen.scrollbackCount() - 1;
+    QCOMPARE(screen.lineText(row), QStringLiteral("你好"));
+    QCOMPARE(screen.lineAt(row).cells.size(), 4);
+    QVERIFY(screen.lineAt(row).cells.at(3).continuation);
+}
+
+void TerminalScreenTest::sharedCharacterStorage()
+{
+    TerminalScreen screen(20, 2);
+    screen.feed(QStringLiteral("ee\u0301\U0001F642\u4f60"));
+    QCOMPARE(screen.lineText(0), QStringLiteral("ee\u0301\U0001F642\u4f60"));
+    QCOMPARE(screen.lineAt(0).cells.at(0).text, QStringLiteral("e"));
+    QCOMPARE(screen.lineAt(0).cells.at(1).text, QStringLiteral("e\u0301"));
+    QCOMPARE(screen.cursorColumn(), 6);
+    screen.feed(QStringLiteral("\r\nee"));
+    const auto &cells = screen.lineAt(1).cells;
+    QCOMPARE(cells.at(0).text.constData(), cells.at(1).text.constData());
+    QCOMPARE(cells.at(0).text.constData(), screen.lineAt(0).cells.at(0).text.constData());
+    screen.feed(QStringLiteral("\x1b[?1049hX\x1b[?1049lY"));
+    QCOMPARE(screen.lineText(1), QStringLiteral("eeY"));
+    QCOMPARE(screen.lineAt(0).cells.at(0).text, QStringLiteral("e"));
+}
+
+void TerminalScreenTest::resizeMovesLinesToScrollback()
+{
+    TerminalScreen screen(160, 4);
+    screen.feed(QStringLiteral("one\r\ntwo\r\nthree\r\nfour"));
+    screen.setSize(160, 2);
+    QCOMPARE(screen.scrollbackCount(), 2);
+    QCOMPARE(screen.lineText(0), QStringLiteral("one"));
+    QCOMPARE(screen.lineText(1), QStringLiteral("two"));
+    QCOMPARE(screen.lineAt(0).cells.capacity(), 3);
+    QCOMPARE(screen.lineAt(1).cells.capacity(), 3);
+    QCOMPARE(screen.lineText(2), QStringLiteral("three"));
+    QCOMPARE(screen.lineText(3), QStringLiteral("four"));
+}
 
 void TerminalScreenTest::oversizedEscapeSequences()
 {

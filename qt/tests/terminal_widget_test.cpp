@@ -12,6 +12,28 @@ using namespace wsc;
 class TerminalWidgetTest : public QObject {
     Q_OBJECT
 private slots:
+    void selectionPaintsCompactedScrollback()
+    {
+        TerminalWidget terminal;
+        terminal.resize(640, 240);
+        terminal.show();
+        QTest::qWait(20);
+        const int lines = terminal.screen()->rows() + 2;
+        for (int index = 0; index < lines; ++index)
+            terminal.feed("x\r\n");
+        QCOMPARE(terminal.screen()->lineAt(0).cells.size(), 1);
+        QTest::keyClick(&terminal, Qt::Key_Home, Qt::ControlModifier | Qt::ShiftModifier);
+        const QImage before = terminal.grab().toImage();
+        terminal.selectAll();
+        const QImage after = terminal.grab().toImage();
+        const qreal dpr = after.devicePixelRatio();
+        const QPoint pixel(qRound(terminal.width() / 2 * dpr), qRound(12 * dpr));
+        const auto palette = terminal.screen()->palette();
+        QCOMPARE(before.pixelColor(pixel), palette.background);
+        QCOMPARE(after.pixelColor(pixel), palette.selection);
+        QCOMPARE(terminal.selectedText().count(QLatin1Char('x')), lines);
+    }
+
     void keyboardStaysInTerminal()
     {
         QWidget window;
