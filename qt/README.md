@@ -49,6 +49,15 @@ Windows 文件管理器，使用 C++20、Qt 6 Widgets、libssh2 和 Qt Network�
 
 开发程序在 `qt/build/Debug/WinSCPQt.exe`。默认便携发布包在 `qt/dist/WinSCPQt-1.0.0-win64.zip`，同时生成同名 `.zip.sha256` 校验文件。解压后运行 `WinSCPQt.exe`；程序目录下的 `portable.ini` 使配置保存在 `data/`。不要覆盖已有便携目录中的 `data/` 或 `downloads/`。
 
+生成便携包和当前用户安装程序：
+
+```powershell
+.\qt\scripts\deploy.ps1 -PackageName WinSCPQt-1.0.0-win64-portable
+.\qt\scripts\installer.ps1 -CompilerPath "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+```
+
+安装程序构建需要 Inno Setup 6.3+，也可通过 `INNOSETUP_COMPILER` 或 `PATH` 指定编译器。脚本默认使用 `qt/dist/WinSCPQt-1.0.0-win64-portable/`，拒绝打包包含 `data/` 或 `downloads/` 的目录，输出 `qt/dist/WinSCPQt-1.0.0-win64-setup.exe` 和同名 `.sha256` 校验文件。安装默认无需管理员权限，程序位于当前用户的 `AppData/Local/Programs/WinSCPQt/`，提供开始菜单快捷方式和可选桌面快捷方式。安装版不包含 `portable.ini`，配置保存在 Windows 用户应用配置目录；卸载保留配置和下载文件。
+
 ```powershell
 WinSCPQt.exe
 WinSCPQt.exe --url "sftp://user@server:22/home/user"
