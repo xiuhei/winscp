@@ -70,6 +70,7 @@ public:
     FileInfo entryAtViewRow(int row) const;
     void selectByName(const QStringList &names);
     void updateFileIconTheme();
+    void setActive(bool active);
 
     void setShowHidden(bool show);
     bool showHidden() const;
@@ -120,6 +121,7 @@ private:
     void activateCurrent();
     void loadLocalDirectory(const QString &path, bool addHistory);
     void updateCombo(const QString &path);
+    void updateBreadcrumbs(const QString &path);
     void showContextMenu(const QPoint &position);
     void handleDrop(const QList<FileInfo> &sourceEntries, bool sourceRemote,
                     const QString &targetDirectory);

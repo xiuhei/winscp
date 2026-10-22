@@ -1,0 +1,55 @@
+QToolBar { border: none; border-bottom: 1px solid; spacing: 2px; padding: 3px 6px; }
+QToolBar::separator { width: 1px; margin: 4px 5px; }
+QToolButton { border: 1px solid transparent; border-radius: 3px; padding: 3px; }
+QToolButton:focus { border: 1px solid; }
+QToolButton#AutoRefreshButton { padding: 2px 7px; }
+QPushButton { border: 1px solid; border-radius: 3px; min-height: 22px; padding: 2px 14px; }
+QPushButton:default { border: 1px solid; }
+QMenuBar { border: none; }
+QMenuBar::item { padding: 4px 8px; background: transparent; }
+QMenu { border: 1px solid; padding: 4px; }
+QMenu::item { padding: 5px 28px 5px 24px; border-radius: 2px; }
+QMenu::separator { height: 1px; margin: 4px 6px; }
+QLineEdit, QComboBox, QAbstractSpinBox { border: 1px solid; border-radius: 3px; min-height: 22px; padding: 1px 5px; }
+QComboBox { padding-right: 20px; }
+QComboBox::drop-down { border: none; width: 20px; }
+QComboBox::down-arrow { width: 10px; height: 6px; }
+QComboBox QLineEdit { border: none; border-radius: 0; min-height: 0; padding: 0; background: transparent; }
+QComboBox QAbstractItemView { border: 1px solid; padding: 2px; outline: none; }
+QAbstractSpinBox { padding-right: 18px; }
+QAbstractSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right; width: 18px; border: none; }
+QAbstractSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right; width: 18px; border: none; }
+QAbstractSpinBox::up-arrow, QAbstractSpinBox::down-arrow { width: 8px; height: 5px; }
+QCheckBox { spacing: 6px; }
+QHeaderView::section { border: none; border-right: 1px solid; border-bottom: 1px solid; padding: 4px 6px; font-weight: normal; }
+QHeaderView::up-arrow, QHeaderView::down-arrow { width: 10px; height: 6px; }
+QTableView, QTreeView, QListView { border: none; outline: none; }
+QTableView::item, QTreeView::item { padding: 0 4px; border: none; }
+QSplitter::handle { border: none; }
+QSplitter::handle:vertical { height: 4px; }
+QSplitter::handle:horizontal { width: 4px; }
+QFrame#Pane, QFrame#TerminalPanel { border: 1px solid; }
+QFrame#PaneHeader, QFrame#TerminalToolbar { border: none; border-bottom: 1px solid; }
+QLabel#PaneBadge { border-radius: 2px; padding: 2px 5px; }
+QLabel#PaneTitle, QLabel#TerminalTitle { font-weight: 600; }
+QLabel#PathBreadcrumbs { border: 1px solid; border-radius: 3px; }
+QFrame#PaneFooterLine { max-height: 1px; border: none; }
+QLineEdit#FilterEdit { min-height: 20px; padding: 1px 4px; }
+QLabel#WelcomeTitle { font-size: 10pt; font-weight: bold; }
+QTabWidget::pane { border: none; }
+QTabBar::tab { border: none; border-bottom: 2px solid transparent; padding: 4px 9px; margin-right: 2px; }
+QTabBar::close-button { image: url(:/icons/close-light.svg); width: 12px; height: 12px; border-radius: 2px; padding: 2px; }
+QTabBar#SessionTabs { qproperty-drawBase: 0; }
+QStatusBar { border-top: 1px solid; min-height: 22px; }
+QStatusBar::item { border: none; }
+QDockWidget::title { padding: 4px 6px; }
+QListWidget#LoginSites { border: 1px solid; border-radius: 3px; padding: 4px; }
+QListWidget#LoginSites::item { padding: 8px 6px; border-radius: 3px; }
+QGroupBox { border: 1px solid; border-radius: 3px; margin-top: 10px; }
+QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }
+QLabel#LoginHeading { font-size: 14pt; font-weight: 600; }
+QLabel#LoginSitesHeading { font-weight: 600; padding: 2px 0; }
+QFrame#LoginFooter { border: none; border-top: 1px solid; }
+QProgressBar { border: none; border-radius: 2px; text-align: center; }
+QProgressBar::chunk { border-radius: 2px; }
+QToolTip { border: 1px solid; padding: 5px 7px; }

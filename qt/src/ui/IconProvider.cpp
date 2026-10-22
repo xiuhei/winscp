@@ -98,15 +98,21 @@ public:
     QIconEngine *clone() const override { return new ThemeIconEngine(m_name, m_color); }
     QPixmap pixmap(const QSize &size, QIcon::Mode mode, QIcon::State) override
     {
+        return scaledPixmap(size, mode, QIcon::Off, 1.0);
+    }
+    QPixmap scaledPixmap(const QSize &size, QIcon::Mode mode, QIcon::State, qreal scale) override
+    {
         QColor color = m_color.isValid() ? m_color : Theme::iconColor();
         if (mode == QIcon::Disabled)
             color = Theme::isDark() ? QColor(QStringLiteral("#a0a0a0")) : QColor(QStringLiteral("#8c939b"));
-        return IconProvider::instance().pixmap(m_name, qMin(size.width(), size.height()), color);
+        return IconProvider::instance().pixmap(m_name, qMin(size.width(), size.height()), color, scale);
     }
     void paint(QPainter *painter, const QRect &rect, QIcon::Mode mode, QIcon::State state) override
     {
-        const auto image = pixmap(rect.size(), mode, state);
-        painter->drawPixmap(rect.center() - QPoint(image.width() / 2, image.height() / 2), image);
+        const auto image = scaledPixmap(rect.size(), mode, state, painter->device()->devicePixelRatioF());
+        const QSizeF logicalSize = image.deviceIndependentSize();
+        painter->drawPixmap(QPointF(rect.center()) - QPointF(logicalSize.width() / 2,
+                                                           logicalSize.height() / 2), image);
     }
 private:
     QString m_name;
@@ -133,10 +139,10 @@ QIcon IconProvider::icon(const QString &name, const QColor &color, int size)
     return result;
 }
 
-QPixmap IconProvider::pixmap(const QString &name, int size, const QColor &color)
+QPixmap IconProvider::pixmap(const QString &name, int size, const QColor &color, qreal dpr)
 {
     const QColor effective = color.isValid() ? color : Theme::iconColor();
-    return render(name, size, effective);
+    return render(name, size, effective, dpr);
 }
 
 QPixmap IconProvider::render(const QString &name, int size, const QColor &color, qreal dpr)
@@ -464,6 +470,9 @@ QPixmap IconProvider::render(const QString &name, int size, const QColor &color,
         shoulders.moveTo(12, 54);
         shoulders.cubicTo(14, 38, 50, 38, 52, 54);
         painter.drawPath(shoulders);
+    } else if (name == QLatin1String("plus")) {
+        painter.drawLine(QPointF(14, 32), QPointF(50, 32));
+        painter.drawLine(QPointF(32, 14), QPointF(32, 50));
     } else if (name == QLatin1String("menu")) {
         painter.drawLine(QPointF(12, 18), QPointF(52, 18));
         painter.drawLine(QPointF(12, 32), QPointF(52, 32));

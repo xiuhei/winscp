@@ -471,6 +471,11 @@ private slots:
         Theme::apply(QStringLiteral("light"));
         const QIcon icon = IconProvider::instance().icon(QStringLiteral("refresh"));
         const QImage light = icon.pixmap(32).toImage();
+        for (qreal scale : {1.0, 1.5, 2.0}) {
+            const QPixmap scaled = icon.pixmap(QSize(16, 16), scale);
+            QCOMPARE(scaled.devicePixelRatio(), scale);
+            QCOMPARE(scaled.size(), QSize(qRound(16 * scale), qRound(16 * scale)));
+        }
         Theme::apply(QStringLiteral("dark"));
         const QImage dark = icon.pixmap(32).toImage();
         QVERIFY(light != dark);

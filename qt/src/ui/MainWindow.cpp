@@ -66,6 +66,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_tabs->setElideMode(Qt::ElideRight);
     m_tabs->setUsesScrollButtons(true);
     m_tabs->addTab(QString());
+    m_tabs->setTabIcon(0, IconProvider::instance().icon(QStringLiteral("plus")));
     m_tabs->setTabToolTip(0, QStringLiteral("新建会话 / 登录"));
     for (auto side : {QTabBar::LeftSide, QTabBar::RightSide}) {
         QWidget *button = m_tabs->tabButton(0, side);

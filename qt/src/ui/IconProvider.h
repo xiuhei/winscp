@@ -19,7 +19,7 @@ public:
     QIcon fileIcon(const FileInfo &info, bool local, bool large = false);
     QIcon appIcon();
 
-    QPixmap pixmap(const QString &name, int size, const QColor &color = QColor());
+    QPixmap pixmap(const QString &name, int size, const QColor &color = QColor(), qreal dpr = 1.0);
 
 private:
     IconProvider() = default;

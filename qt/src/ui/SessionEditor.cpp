@@ -35,7 +35,7 @@ void SessionEditor::buildUi()
     auto *form = new QGridLayout(connection);
     form->setContentsMargins(12, 16, 12, 12);
     form->setHorizontalSpacing(8);
-    form->setVerticalSpacing(6);
+    form->setVerticalSpacing(8);
     form->setColumnStretch(0, 1);
     form->setColumnStretch(1, 1);
     const auto label = [connection, form](const QString &text, QWidget *field, int row, int column, int span = 1) {
@@ -51,6 +51,7 @@ void SessionEditor::buildUi()
     label(QStringLiteral("文件协议(&F)"), m_protocolCombo, 0, 0);
     m_hostEdit = new QLineEdit(connection);
     m_hostEdit->setObjectName(QStringLiteral("SessionHost"));
+    m_hostEdit->setPlaceholderText(QStringLiteral("主机名或 IP 地址"));
     label(QStringLiteral("主机名(&H)"), m_hostEdit, 2, 0, 2);
     m_portSpin = new QSpinBox(connection);
     m_portSpin->setObjectName(QStringLiteral("SessionPort"));
@@ -69,6 +70,8 @@ void SessionEditor::buildUi()
     m_passwordEdit->setEchoMode(QLineEdit::Password);
     m_passwordToggle = new QToolButton(passwordRow);
     m_passwordToggle->setCheckable(true);
+    m_passwordToggle->setFixedSize(26, 26);
+    m_passwordToggle->setAccessibleName(QStringLiteral("显示或隐藏密码"));
     m_passwordToggle->setIcon(IconProvider::instance().icon(QStringLiteral("eye")));
     m_passwordToggle->setToolTip(QStringLiteral("显示密码"));
     passwordLayout->addWidget(m_passwordEdit, 1);

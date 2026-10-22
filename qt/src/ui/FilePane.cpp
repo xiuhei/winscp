@@ -136,8 +136,9 @@ QToolButton *makeToolButton(QWidget *parent, const QString &iconName, const QStr
     button->setIcon(IconProvider::instance().icon(iconName));
     button->setIconSize(QSize(16, 16));
     button->setToolTip(tooltip);
+    button->setAccessibleName(tooltip);
     button->setAutoRaise(true);
-    button->setFixedSize(22, 22);
+    button->setFixedSize(26, 26);
     button->setFocusPolicy(Qt::NoFocus);
     return button;
 }
@@ -237,8 +238,8 @@ void FilePane::buildUi()
     auto *header = new QFrame(this);
     header->setObjectName(QStringLiteral("PaneHeader"));
     auto *headerLayout = new QVBoxLayout(header);
-    headerLayout->setContentsMargins(3, 1, 3, 2);
-    headerLayout->setSpacing(1);
+    headerLayout->setContentsMargins(6, 4, 6, 3);
+    headerLayout->setSpacing(2);
 
     auto *titleRow = new QHBoxLayout();
     titleRow->setSpacing(4);
@@ -249,12 +250,12 @@ void FilePane::buildUi()
         m_badgeLabel->setProperty("role", QStringLiteral("remote"));
     m_titleLabel = new QLabel(header);
     m_titleLabel->setObjectName(QStringLiteral("PaneTitle"));
+    m_titleLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     m_titleLabel->setText(m_role == Role::Local ? QStringLiteral("本地文件")
                                                 : QStringLiteral("远程文件"));
 
     titleRow->addWidget(m_badgeLabel);
-    titleRow->addWidget(m_titleLabel);
-    titleRow->addStretch(1);
+    titleRow->addWidget(m_titleLabel, 1);
 
     m_terminalButton = makeToolButton(header, QStringLiteral("terminal"), QStringLiteral("在终端中打开"));
     m_hiddenButton = makeToolButton(header, QStringLiteral("eye-off"), QStringLiteral("显示隐藏文件"));
@@ -271,6 +272,8 @@ void FilePane::buildUi()
     if (isRemote()) {
         m_autoRefreshButton = new QToolButton(header);
         m_autoRefreshButton->setObjectName(QStringLiteral("AutoRefreshButton"));
+        m_autoRefreshButton->setFixedHeight(26);
+        m_autoRefreshButton->setAccessibleName(QStringLiteral("自动刷新远程目录"));
         m_autoRefreshButton->setCheckable(true);
         m_autoRefreshButton->setAutoRaise(true);
         m_autoRefreshButton->setChecked(Settings::instance().autoRefresh);
@@ -315,6 +318,7 @@ void FilePane::buildUi()
     pathRow->addWidget(m_upButton);
     pathRow->addWidget(m_homeButton);
     m_pathStack = new QStackedWidget(header);
+    m_pathStack->setFixedHeight(26);
     m_breadcrumbs = new QLabel(m_pathStack);
     m_breadcrumbs->setObjectName(QStringLiteral("PathBreadcrumbs"));
     m_breadcrumbs->setTextFormat(Qt::RichText);
@@ -397,10 +401,11 @@ void FilePane::buildUi()
 
     auto *footer = new QWidget(this);
     auto *footerLayout = new QHBoxLayout(footer);
-    footerLayout->setContentsMargins(3, 2, 3, 2);
-    footerLayout->setSpacing(4);
+    footerLayout->setContentsMargins(6, 4, 6, 4);
+    footerLayout->setSpacing(8);
     m_filterEdit = new QLineEdit(footer);
     m_filterEdit->setObjectName(QStringLiteral("FilterEdit"));
+    m_filterEdit->setAccessibleName(QStringLiteral("筛选文件"));
     m_filterEdit->setPlaceholderText(QStringLiteral("筛选，例如 *.log"));
     m_filterEdit->setClearButtonEnabled(true);
     m_filterEdit->setFixedWidth(150);
@@ -408,10 +413,10 @@ void FilePane::buildUi()
                             QLineEdit::LeadingPosition);
     m_statusLabel = new QLabel(footer);
     m_statusLabel->setObjectName(QStringLiteral("PaneFooter"));
+    m_statusLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     m_statusLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     footerLayout->addWidget(m_filterEdit);
-    footerLayout->addStretch(1);
-    footerLayout->addWidget(m_statusLabel);
+    footerLayout->addWidget(m_statusLabel, 1);
     outer->addWidget(footer);
 
     m_model = new FileTableModel(!isRemote(), this);
@@ -606,7 +611,7 @@ void FilePane::buildWelcomePage()
     buttonRow->addStretch(1);
     m_newSessionButton = new QPushButton(QStringLiteral("新建会话"), m_welcomePage);
     m_newSessionButton->setProperty("accent", true);
-    m_newSessionButton->setIcon(IconProvider::instance().icon(QStringLiteral("connect"), Theme::iconColor()));
+    m_newSessionButton->setIcon(IconProvider::instance().icon(QStringLiteral("connect")));
     m_siteManagerButton = new QPushButton(QStringLiteral("站点管理器"), m_welcomePage);
     m_siteManagerButton->setIcon(IconProvider::instance().icon(QStringLiteral("site")));
     buttonRow->addWidget(m_newSessionButton);
@@ -1124,6 +1129,24 @@ void FilePane::updateFileIconTheme()
     }
     m_emptyLabel->setStyleSheet(QStringLiteral("color: %1; background: transparent; font-size: 9pt;")
                                     .arg(Theme::muted().name()));
+    m_filterEdit->actions().first()->setIcon(
+        IconProvider::instance().icon(QStringLiteral("search"), Theme::muted()));
+    m_welcomeIcon->setPixmap(IconProvider::instance().icon(QStringLiteral("connect"), Theme::accent())
+                                .pixmap(QSize(24, 24), devicePixelRatioF()));
+    updateBreadcrumbs(isRemote() ? m_remotePath : localDisplay(m_localPath));
+}
+
+void FilePane::setActive(bool active)
+{
+    if (property("active").isValid() && property("active").toBool() == active)
+        return;
+    setProperty("active", active);
+    auto *header = findChild<QFrame *>(QStringLiteral("PaneHeader"));
+    for (QWidget *widget : {static_cast<QWidget *>(this), static_cast<QWidget *>(header)}) {
+        widget->style()->unpolish(widget);
+        widget->style()->polish(widget);
+        widget->update();
+    }
 }
 
 void FilePane::setShowHidden(bool show)
@@ -1161,10 +1184,8 @@ void FilePane::updateHeader()
     }
 }
 
-void FilePane::updateCombo(const QString &path)
+void FilePane::updateBreadcrumbs(const QString &path)
 {
-    if (!m_pathCombo)
-        return;
     QString normalized = QDir::fromNativeSeparators(path);
     QStringList parts = normalized.split(QLatin1Char('/'), Qt::SkipEmptyParts);
     QString target = normalized.startsWith(QLatin1Char('/')) ? QStringLiteral("/") : QString();
@@ -1196,6 +1217,13 @@ void FilePane::updateCombo(const QString &path)
         ? links.value(0) + links.mid(1).join(separator) : links.join(separator);
     m_breadcrumbs->setText(breadcrumb);
     m_breadcrumbs->setToolTip(path);
+}
+
+void FilePane::updateCombo(const QString &path)
+{
+    if (!m_pathCombo)
+        return;
+    updateBreadcrumbs(path);
     m_pathStack->setCurrentIndex(0);
     const QSignalBlocker blocker(m_pathCombo);
     m_pathCombo->setEditText(path);

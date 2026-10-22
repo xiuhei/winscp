@@ -1226,6 +1226,8 @@ void SessionWorkspace::updateActions()
     const bool connected = remoteReady();
     const bool connecting = m_connecting;
     FilePane *pane = activePane();
+    m_localPane->setActive(pane == m_localPane);
+    m_remotePane->setActive(pane == m_remotePane);
     const bool paneRemote = pane && pane->isRemote();
     const QList<FileInfo> selected = pane ? pane->selectedEntries() : QList<FileInfo>();
 

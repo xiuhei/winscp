@@ -85,14 +85,14 @@ void Theme::apply(const QString &name)
             palette.setColor(QPalette::Disabled, QPalette::WindowText,
                              QColor(QStringLiteral("#a0a0a0")));
         } else {
-            palette.setColor(QPalette::Window, QColor(QStringLiteral("#f0f0f0")));
-            palette.setColor(QPalette::WindowText, QColor(QStringLiteral("#000000")));
+            palette.setColor(QPalette::Window, QColor(QStringLiteral("#f3f5f7")));
+            palette.setColor(QPalette::WindowText, QColor(QStringLiteral("#24303f")));
             palette.setColor(QPalette::Base, QColor(QStringLiteral("#ffffff")));
             palette.setColor(QPalette::AlternateBase, QColor(QStringLiteral("#ffffff")));
-            palette.setColor(QPalette::Text, QColor(QStringLiteral("#000000")));
-            palette.setColor(QPalette::Button, QColor(QStringLiteral("#f0f0f0")));
-            palette.setColor(QPalette::ButtonText, QColor(QStringLiteral("#000000")));
-            palette.setColor(QPalette::Highlight, QColor(QStringLiteral("#0078d7")));
+            palette.setColor(QPalette::Text, QColor(QStringLiteral("#24303f")));
+            palette.setColor(QPalette::Button, QColor(QStringLiteral("#f3f5f7")));
+            palette.setColor(QPalette::ButtonText, QColor(QStringLiteral("#24303f")));
+            palette.setColor(QPalette::Highlight, QColor(QStringLiteral("#2468a4")));
             palette.setColor(QPalette::HighlightedText, QColor(QStringLiteral("#ffffff")));
             palette.setColor(QPalette::ToolTipBase, QColor(QStringLiteral("#ffffff")));
             palette.setColor(QPalette::ToolTipText, QColor(QStringLiteral("#24303f")));
@@ -101,7 +101,8 @@ void Theme::apply(const QString &name)
         }
         palette.setColor(QPalette::Link, accent());
         app->setPalette(palette);
-        app->setStyleSheet(styleSheet(g_currentTheme));
+        app->setStyleSheet(styleSheet(QStringLiteral("common")) + QLatin1Char('\n') +
+                          styleSheet(g_currentTheme));
 
         QFont font = app->font();
         font.setFamilies({QStringLiteral("Segoe UI"), QStringLiteral("Microsoft YaHei UI"),
@@ -129,12 +130,12 @@ QColor Theme::accent()
 
 QColor Theme::text()
 {
-    return g_isDark ? QColor(QStringLiteral("#dedede")) : QColor(QStringLiteral("#000000"));
+    return g_isDark ? QColor(QStringLiteral("#dedede")) : QColor(QStringLiteral("#24303f"));
 }
 
 QColor Theme::muted()
 {
-    return g_isDark ? QColor(QStringLiteral("#b6b6b6")) : QColor(QStringLiteral("#7b8a9d"));
+    return g_isDark ? QColor(QStringLiteral("#b6b6b6")) : QColor(QStringLiteral("#657386"));
 }
 
 QColor Theme::danger()

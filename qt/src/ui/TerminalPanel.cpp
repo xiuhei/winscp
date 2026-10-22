@@ -42,8 +42,9 @@ QToolButton *makeToolButton(QWidget *parent, const QString &iconName, const QStr
     button->setIcon(IconProvider::instance().icon(iconName));
     button->setIconSize(QSize(16, 16));
     button->setToolTip(tooltip);
+    button->setAccessibleName(tooltip);
     button->setAutoRaise(true);
-    button->setFixedSize(22, 22);
+    button->setFixedSize(26, 26);
     button->setFocusPolicy(Qt::NoFocus);
     return button;
 }
@@ -76,9 +77,10 @@ void TerminalPanel::buildUi()
     auto *toolbar = new QFrame(this);
     toolbar->setObjectName(QStringLiteral("TerminalToolbar"));
     auto *toolbarLayout = new QHBoxLayout(toolbar);
-    toolbarLayout->setContentsMargins(4, 1, 3, 1);
-    toolbarLayout->setSpacing(3);
+    toolbarLayout->setContentsMargins(6, 3, 6, 3);
+    toolbarLayout->setSpacing(6);
     auto *icon = new QLabel(toolbar);
+    icon->setObjectName(QStringLiteral("TerminalHeaderIcon"));
     icon->setPixmap(IconProvider::instance().icon(QStringLiteral("terminal"))
                         .pixmap(16, 16));
     auto *title = new QLabel(QStringLiteral("终端"), toolbar);
@@ -168,6 +170,7 @@ void TerminalPanel::buildWelcomePage()
     layout->setSpacing(8);
     layout->addStretch(1);
     auto *icon = new QLabel(m_welcomePage);
+    icon->setObjectName(QStringLiteral("TerminalWelcomeIcon"));
     icon->setPixmap(IconProvider::instance().icon(QStringLiteral("terminal"), Theme::accent())
                         .pixmap(24, 24));
     icon->setAlignment(Qt::AlignCenter);
@@ -180,7 +183,7 @@ void TerminalPanel::buildWelcomePage()
     m_welcomeHint->setWordWrap(true);
     m_welcomeButton = new QPushButton(QStringLiteral("打开终端"), m_welcomePage);
     m_welcomeButton->setProperty("accent", true);
-    m_welcomeButton->setIcon(IconProvider::instance().icon(QStringLiteral("terminal"), Theme::iconColor()));
+    m_welcomeButton->setIcon(IconProvider::instance().icon(QStringLiteral("terminal")));
     auto *buttonRow = new QHBoxLayout();
     buttonRow->addStretch(1);
     buttonRow->addWidget(m_welcomeButton);
@@ -467,6 +470,11 @@ void TerminalPanel::zoomFont(int delta)
 
 void TerminalPanel::applySettings()
 {
+    findChild<QLabel *>(QStringLiteral("TerminalHeaderIcon"))->setPixmap(
+        IconProvider::instance().icon(QStringLiteral("terminal")).pixmap(QSize(16, 16), devicePixelRatioF()));
+    findChild<QLabel *>(QStringLiteral("TerminalWelcomeIcon"))->setPixmap(
+        IconProvider::instance().icon(QStringLiteral("terminal"), Theme::accent())
+            .pixmap(QSize(24, 24), devicePixelRatioF()));
     for (TabData &data : m_tabsData) {
         if (data.widget)
             data.widget->applySettings();
