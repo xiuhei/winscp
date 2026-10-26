@@ -82,7 +82,7 @@ TransferQueueWidget::TransferQueueWidget(TransferManager *manager, QWidget *pare
     toolbar->setSpacing(4);
     auto *title = new QLabel(QStringLiteral("传输队列"), this);
     QFont titleFont = title->font();
-    titleFont.setBold(true);
+    title->setObjectName(QStringLiteral("DialogHeading"));
     title->setFont(titleFont);
     toolbar->addWidget(title);
     toolbar->addStretch(1);

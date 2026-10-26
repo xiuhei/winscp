@@ -19,6 +19,7 @@
 #include "ui/TerminalPanel.h"
 #include "ui/TextEditorDialog.h"
 #include "ui/Theme.h"
+#include "ui/Splitter.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -313,9 +314,9 @@ void SessionWorkspace::buildUi()
     m_localPane->setShowHidden(Settings::instance().showHiddenFiles);
     m_remotePane->setShowHidden(Settings::instance().showHiddenFiles);
 
-    m_commanderSplitter = new QSplitter(Qt::Horizontal, this);
+    m_commanderSplitter = new Splitter(Qt::Horizontal, this);
     m_commanderSplitter->setObjectName(QStringLiteral("CommanderSplitter"));
-    m_commanderSplitter->setChildrenCollapsible(false);
+    m_commanderSplitter->setChildrenCollapsible(true);
     m_commanderSplitter->addWidget(m_localPane);
     m_commanderSplitter->addWidget(m_remotePane);
     m_commanderSplitter->setStretchFactor(0, 1);
@@ -326,9 +327,9 @@ void SessionWorkspace::buildUi()
     m_terminalPanel->setFileSystemController(m_remoteFs);
     m_terminalPanel->setSession(SessionData());
 
-    m_mainSplitter = new QSplitter(Qt::Vertical, this);
+    m_mainSplitter = new Splitter(Qt::Vertical, this);
     m_mainSplitter->setObjectName(QStringLiteral("MainSplitter"));
-    m_mainSplitter->setChildrenCollapsible(false);
+    m_mainSplitter->setChildrenCollapsible(true);
     m_mainSplitter->addWidget(m_commanderSplitter);
     m_mainSplitter->addWidget(m_terminalPanel);
     m_mainSplitter->setStretchFactor(0, 4);

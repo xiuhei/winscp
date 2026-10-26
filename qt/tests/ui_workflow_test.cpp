@@ -6,6 +6,7 @@
 #include "ui/LoginDialog.h"
 #include "ui/SessionEditor.h"
 #include "ui/Theme.h"
+#include "ui/Splitter.h"
 #include "ui/TextEditorDialog.h"
 #include "ui/MainWindow.h"
 #include "ui/SessionWorkspace.h"
@@ -19,6 +20,7 @@
 #include <QDialogButtonBox>
 #include <QJsonObject>
 #include <QLineEdit>
+#include <QLabel>
 #include <QFile>
 #include <QMessageBox>
 #include <QListWidget>
@@ -487,6 +489,70 @@ private slots:
                 if (disabled.pixelColor(x, y).alpha() > 100 && disabled.pixelColor(x, y).lightness() > 140)
                     ++brightPixels;
         QVERIFY(brightPixels > 30);
+    }
+
+    void themeSwitchUpdatesExistingWidgets()
+    {
+        QWidget window;
+        QLabel heading(QStringLiteral("文件管理"), &window);
+        heading.setObjectName(QStringLiteral("DialogHeading"));
+        Theme::apply(QStringLiteral("light"));
+        window.show();
+        heading.ensurePolished();
+        const int pointSize = heading.font().pointSize();
+        const int lightWeight = heading.font().weight();
+        Theme::apply(QStringLiteral("dark"));
+        QVERIFY(heading.font().weight() < lightWeight);
+        QCOMPARE(heading.font().pointSize(), pointSize);
+        QVERIFY(Theme::terminalBackground().lightness() > 0);
+        for (const auto &name : {QStringLiteral("light"), QStringLiteral("dark")}) {
+            const QString sheet = Theme::styleSheet(name);
+            QVERIFY(!sheet.contains(QLatin1Char('@')));
+            QVERIFY(!sheet.contains(QStringLiteral("#000000")));
+        }
+        const QFontMetrics metrics(QApplication::font());
+        QCOMPARE(metrics.horizontalAdvance(QStringLiteral("1111")),
+                 metrics.horizontalAdvance(QStringLiteral("9999")));
+        Theme::apply(QStringLiteral("light"));
+    }
+
+    void splitterDragCanCancelResetAndCollapse()
+    {
+        for (const auto orientation : {Qt::Horizontal, Qt::Vertical}) {
+            Splitter splitter(orientation);
+            splitter.resize(800, 800);
+            splitter.addWidget(new QWidget);
+            splitter.addWidget(new QWidget);
+            splitter.setSizes({400, 400});
+            splitter.show();
+            QTest::qWait(20);
+            auto *handle = splitter.handle(1);
+            const auto point = [&](int position) {
+                return handle->mapFrom(&splitter, orientation == Qt::Horizontal
+                    ? QPoint(position, 400) : QPoint(400, position));
+            };
+            const QList<int> original = splitter.sizes();
+            QTest::mousePress(handle, Qt::LeftButton);
+            QTest::mouseMove(handle, point(550));
+            QTest::keyClick(&splitter, Qt::Key_Escape);
+            QTest::mouseMove(handle, point(600));
+            QTest::mouseRelease(handle, Qt::LeftButton, Qt::NoModifier, point(600));
+            QCOMPARE(splitter.sizes(), original);
+
+            QTest::mousePress(handle, Qt::LeftButton);
+            QTest::mouseMove(handle, point(100));
+            QTest::mouseRelease(handle, Qt::LeftButton, Qt::NoModifier, point(100));
+            QCOMPARE(splitter.sizes().first(), 0);
+            QTest::mouseDClick(handle, Qt::LeftButton);
+            QVERIFY(qAbs(splitter.sizes().first() - splitter.sizes().last()) <= 1);
+
+            QTest::mousePress(handle, Qt::LeftButton);
+            QTest::mouseMove(handle, point(700));
+            QTest::mouseRelease(handle, Qt::LeftButton, Qt::NoModifier, point(700));
+            QCOMPARE(splitter.sizes().last(), 0);
+            QTest::mouseDClick(handle, Qt::LeftButton);
+            QVERIFY(qAbs(splitter.sizes().first() - splitter.sizes().last()) <= 1);
+        }
     }
 
 private:

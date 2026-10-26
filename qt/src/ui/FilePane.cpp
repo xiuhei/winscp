@@ -309,7 +309,7 @@ void FilePane::buildUi()
     m_pathCombo->setInsertPolicy(QComboBox::NoInsert);
     m_pathCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     m_pathCombo->setMinimumWidth(120);
-    m_pathCombo->setMaxVisibleItems(18);
+    m_pathCombo->setMaxVisibleItems(8);
     m_pathCombo->lineEdit()->setPlaceholderText(QStringLiteral("输入路径后按回车"));
     m_pathCombo->lineEdit()->setClearButtonEnabled(false);
 
@@ -365,6 +365,7 @@ void FilePane::buildUi()
     m_table->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_table->setSortingEnabled(true);
     m_table->setWordWrap(false);
+    m_table->setTextElideMode(Qt::ElideMiddle);
     m_table->setShowGrid(false);
     m_table->setDragEnabled(true);
     m_table->setAcceptDrops(true);

@@ -14,6 +14,47 @@ namespace wsc {
 namespace {
 QString g_currentTheme = QStringLiteral("light");
 bool g_isDark = false;
+
+struct ColorToken {
+    const char *name;
+    const char *light;
+    const char *dark;
+};
+
+constexpr ColorToken colors[] = {
+    {"window", "#f3f5f7", "#292929"},
+    {"surface", "#f9fafb", "#242424"},
+    {"base", "#ffffff", "#1f1f1f"},
+    {"border", "#d5dbe3", "#454545"},
+    {"text", "#24303f", "#dedede"},
+    {"muted", "#657386", "#b6b6b6"},
+    {"hover", "#e9edf1", "#303030"},
+    {"pressed", "#dfe7ef", "#3a3a3a"},
+    {"focus", "#8190a0", "#878787"},
+    {"disabled", "#9ba5b0", "#858585"},
+    {"selection", "#dceafa", "#414141"},
+    {"selection-text", "#173d64", "#f0f0f0"},
+    {"inactive", "#e9edf2", "#343434"},
+    {"active-header", "#eef2f6", "#2a2a2a"},
+    {"primary", "#2468a4", "#dedede"},
+    {"primary-hover", "#1c5890", "#f0f0f0"},
+    {"primary-pressed", "#174c7b", "#b6b6b6"},
+    {"primary-text", "#ffffff", "#1f1f1f"},
+    {"terminal", "#181818", "#181818"},
+    {"accent", "#0066b8", "#dedede"},
+    {"icon", "#465a71", "#f0f0f0"},
+    {"danger", "#c0392b", "#e06c75"},
+    {"success", "#2e8b57", "#56c596"},
+};
+
+QColor color(const char *name)
+{
+    for (const auto &token : colors) {
+        if (QLatin1String(token.name) == QLatin1String(name))
+            return QColor(QLatin1String(g_isDark ? token.dark : token.light));
+    }
+    Q_UNREACHABLE();
+}
 } // namespace
 
 QColor TerminalPalette::ansiColor(int index, bool bold) const
@@ -47,10 +88,17 @@ QColor TerminalPalette::xtermColor(int index) const
 
 QString Theme::styleSheet(const QString &name)
 {
-    QFile file(QStringLiteral(":/themes/%1.qss").arg(name));
+    const bool dark = name == QLatin1String("dark");
+    QFile file(QStringLiteral(":/themes/common.qss"));
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
         return {};
-    return QString::fromUtf8(file.readAll());
+    QString sheet = QString::fromUtf8(file.readAll());
+    for (const auto &token : colors)
+        sheet.replace(QLatin1Char('@') + QLatin1String(token.name) + QLatin1Char('@'),
+                      QLatin1String(dark ? token.dark : token.light));
+    sheet.replace(QStringLiteral("@theme@"), dark ? QStringLiteral("dark") : QStringLiteral("light"));
+    sheet.replace(QStringLiteral("@strong-weight@"), dark ? QStringLiteral("500") : QStringLiteral("600"));
+    return sheet;
 }
 
 void Theme::apply(const QString &name)
@@ -65,49 +113,33 @@ void Theme::apply(const QString &name)
         app->setStyle(style ? style : QStyleFactory::create(QStringLiteral("Fusion")));
 
         QPalette palette;
-        if (g_isDark) {
-            palette.setColor(QPalette::Window, QColor(QStringLiteral("#2b2b2b")));
-            palette.setColor(QPalette::WindowText, QColor(QStringLiteral("#dedede")));
-            palette.setColor(QPalette::Base, QColor(QStringLiteral("#202020")));
-            palette.setColor(QPalette::AlternateBase, QColor(QStringLiteral("#262626")));
-            palette.setColor(QPalette::Text, QColor(QStringLiteral("#dedede")));
-            palette.setColor(QPalette::Button, QColor(QStringLiteral("#333333")));
-            palette.setColor(QPalette::ButtonText, QColor(QStringLiteral("#dedede")));
-            palette.setColor(QPalette::BrightText, QColor(QStringLiteral("#ffffff")));
-            palette.setColor(QPalette::Highlight, QColor(QStringLiteral("#4a4a4a")));
-            palette.setColor(QPalette::HighlightedText, QColor(QStringLiteral("#ffffff")));
-            palette.setColor(QPalette::ToolTipBase, QColor(QStringLiteral("#333333")));
-            palette.setColor(QPalette::ToolTipText, QColor(QStringLiteral("#eeeeee")));
-            palette.setColor(QPalette::PlaceholderText, QColor(QStringLiteral("#a0a0a0")));
-            palette.setColor(QPalette::Disabled, QPalette::Text, QColor(QStringLiteral("#a0a0a0")));
-            palette.setColor(QPalette::Disabled, QPalette::ButtonText,
-                             QColor(QStringLiteral("#a0a0a0")));
-            palette.setColor(QPalette::Disabled, QPalette::WindowText,
-                             QColor(QStringLiteral("#a0a0a0")));
-        } else {
-            palette.setColor(QPalette::Window, QColor(QStringLiteral("#f3f5f7")));
-            palette.setColor(QPalette::WindowText, QColor(QStringLiteral("#24303f")));
-            palette.setColor(QPalette::Base, QColor(QStringLiteral("#ffffff")));
-            palette.setColor(QPalette::AlternateBase, QColor(QStringLiteral("#ffffff")));
-            palette.setColor(QPalette::Text, QColor(QStringLiteral("#24303f")));
-            palette.setColor(QPalette::Button, QColor(QStringLiteral("#f3f5f7")));
-            palette.setColor(QPalette::ButtonText, QColor(QStringLiteral("#24303f")));
-            palette.setColor(QPalette::Highlight, QColor(QStringLiteral("#2468a4")));
-            palette.setColor(QPalette::HighlightedText, QColor(QStringLiteral("#ffffff")));
-            palette.setColor(QPalette::ToolTipBase, QColor(QStringLiteral("#ffffff")));
-            palette.setColor(QPalette::ToolTipText, QColor(QStringLiteral("#24303f")));
-            palette.setColor(QPalette::PlaceholderText, QColor(QStringLiteral("#98a3b0")));
-            palette.setColor(QPalette::Disabled, QPalette::Text, QColor(QStringLiteral("#a0aab6")));
-        }
+        palette.setColor(QPalette::Window, color("window"));
+        palette.setColor(QPalette::WindowText, text());
+        palette.setColor(QPalette::Base, paneBackground());
+        palette.setColor(QPalette::AlternateBase, color("surface"));
+        palette.setColor(QPalette::Text, text());
+        palette.setColor(QPalette::Button, color("surface"));
+        palette.setColor(QPalette::ButtonText, text());
+        palette.setColor(QPalette::BrightText, color("primary-text"));
+        palette.setColor(QPalette::Highlight, color("selection"));
+        palette.setColor(QPalette::HighlightedText, color("selection-text"));
+        palette.setColor(QPalette::ToolTipBase, color("surface"));
+        palette.setColor(QPalette::ToolTipText, text());
+        palette.setColor(QPalette::PlaceholderText, muted());
+        for (const auto role : {QPalette::Text, QPalette::ButtonText, QPalette::WindowText})
+            palette.setColor(QPalette::Disabled, role, color("disabled"));
         palette.setColor(QPalette::Link, accent());
         app->setPalette(palette);
-        app->setStyleSheet(styleSheet(QStringLiteral("common")) + QLatin1Char('\n') +
-                          styleSheet(g_currentTheme));
+        app->setStyleSheet(styleSheet(g_currentTheme));
 
         QFont font = app->font();
         font.setFamilies({QStringLiteral("Segoe UI"), QStringLiteral("Microsoft YaHei UI"),
                           QStringLiteral("Microsoft YaHei")});
         font.setPointSize(9);
+        font.setWeight(static_cast<QFont::Weight>(g_isDark ? 350 : 400));
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+        font.setFeature(QFont::Tag("tnum"), 1);
+#endif
         font.setStyleHint(QFont::SansSerif);
         app->setFont(font);
     }
@@ -125,42 +157,42 @@ bool Theme::isDark()
 
 QColor Theme::accent()
 {
-    return g_isDark ? QColor(QStringLiteral("#dedede")) : QColor(QStringLiteral("#0066b8"));
+    return color("accent");
 }
 
 QColor Theme::text()
 {
-    return g_isDark ? QColor(QStringLiteral("#dedede")) : QColor(QStringLiteral("#24303f"));
+    return color("text");
 }
 
 QColor Theme::muted()
 {
-    return g_isDark ? QColor(QStringLiteral("#b6b6b6")) : QColor(QStringLiteral("#657386"));
+    return color("muted");
 }
 
 QColor Theme::danger()
 {
-    return g_isDark ? QColor(QStringLiteral("#e06c75")) : QColor(QStringLiteral("#c0392b"));
+    return color("danger");
 }
 
 QColor Theme::success()
 {
-    return g_isDark ? QColor(QStringLiteral("#56c596")) : QColor(QStringLiteral("#2e8b57"));
+    return color("success");
 }
 
 QColor Theme::iconColor()
 {
-    return g_isDark ? QColor(QStringLiteral("#f0f0f0")) : QColor(QStringLiteral("#465a71"));
+    return color("icon");
 }
 
 QColor Theme::paneBackground()
 {
-    return g_isDark ? QColor(QStringLiteral("#202020")) : QColor(QStringLiteral("#ffffff"));
+    return color("base");
 }
 
 QColor Theme::terminalBackground()
 {
-    return QColor(QStringLiteral("#000000"));
+    return color("terminal");
 }
 
 QColor Theme::terminalForeground()

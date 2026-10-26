@@ -40,7 +40,7 @@ PropertiesDialog::PropertiesDialog(const FileInfo &info, bool remote, bool canEd
     auto *name = new QLabel(info.name, this);
     QFont nameFont = name->font();
     nameFont.setPointSize(13);
-    nameFont.setBold(true);
+    name->setObjectName(QStringLiteral("DialogHeading"));
     name->setFont(nameFont);
     name->setTextInteractionFlags(Qt::TextSelectableByMouse);
     auto *type = new QLabel(info.typeDescription(), this);

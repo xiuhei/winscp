@@ -167,7 +167,7 @@ void SyncDialog::buildUi()
     auto *title = new QLabel(QStringLiteral("同步目录"), this);
     QFont titleFont = title->font();
     titleFont.setPointSize(15);
-    titleFont.setBold(true);
+    title->setObjectName(QStringLiteral("DialogHeading"));
     title->setFont(titleFont);
     auto *subtitle = new QLabel(
         QStringLiteral("比较本地与远程目录，预览后把差异加入传输队列。"), this);
