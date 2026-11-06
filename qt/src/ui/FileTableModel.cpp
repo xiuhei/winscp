@@ -137,6 +137,9 @@ QVariant FileTableModel::data(const QModelIndex &index, int role) const
 
 QVariant FileTableModel::headerData(int section, Qt::Orientation orientation, int role) const
 {
+    if (orientation == Qt::Horizontal && role == Qt::TextAlignmentRole)
+        return static_cast<int>((section == SizeColumn ? Qt::AlignRight : Qt::AlignLeft) |
+                                Qt::AlignVCenter);
     if (orientation == Qt::Horizontal && role == Qt::DisplayRole) {
         switch (section) {
         case NameColumn:

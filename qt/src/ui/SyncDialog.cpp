@@ -92,17 +92,9 @@ public:
             default:
                 break;
             }
-        } else if (role == Qt::ForegroundRole && index.column() == ActionColumn) {
-            switch (item.action) {
-            case SyncAction::Upload:
-                return Theme::accent();
-            case SyncAction::Download:
-                return Theme::isDark() ? QColor(QStringLiteral("#7cc4ff"))
-                                       : QColor(QStringLiteral("#2f6ea8"));
-            case SyncAction::DeleteRemote:
-            case SyncAction::DeleteLocal:
-                return Theme::danger();
-            }
+        } else if (role == Qt::ForegroundRole && index.column() == ActionColumn &&
+                   (item.action == SyncAction::DeleteRemote || item.action == SyncAction::DeleteLocal)) {
+            return Theme::danger();
         } else if (role == Qt::TextAlignmentRole && index.column() == SizeColumn) {
             return static_cast<int>(Qt::AlignRight | Qt::AlignVCenter);
         } else if (role == Qt::ToolTipRole) {
@@ -157,29 +149,8 @@ SyncDialog::SyncDialog(const SessionData &session, const QString &localRoot,
 void SyncDialog::buildUi()
 {
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(18, 16, 18, 14);
-    layout->setSpacing(10);
-
-    auto *header = new QHBoxLayout();
-    auto *icon = new QLabel(this);
-    icon->setPixmap(IconProvider::instance().icon(QStringLiteral("sync"), Theme::accent())
-                        .pixmap(42, 42));
-    auto *title = new QLabel(QStringLiteral("同步目录"), this);
-    QFont titleFont = title->font();
-    titleFont.setPointSize(15);
-    title->setObjectName(QStringLiteral("DialogHeading"));
-    title->setFont(titleFont);
-    auto *subtitle = new QLabel(
-        QStringLiteral("比较本地与远程目录，预览后把差异加入传输队列。"), this);
-    subtitle->setStyleSheet(QStringLiteral("color: %1;").arg(Theme::muted().name()));
-    auto *titleColumn = new QVBoxLayout();
-    titleColumn->setSpacing(2);
-    titleColumn->addWidget(title);
-    titleColumn->addWidget(subtitle);
-    header->addWidget(icon);
-    header->addSpacing(8);
-    header->addLayout(titleColumn, 1);
-    layout->addLayout(header);
+    layout->setContentsMargins(16, 16, 16, 16);
+    layout->setSpacing(12);
 
     auto *paths = new QWidget(this);
     auto *pathLayout = new QGridLayout(paths);
@@ -191,8 +162,11 @@ void SyncDialog::buildUi()
                                this);
     m_localLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_remoteLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_localLabel->setStyleSheet(QStringLiteral("color: %1;").arg(Theme::muted().name()));
-    m_remoteLabel->setStyleSheet(QStringLiteral("color: %1;").arg(Theme::muted().name()));
+    for (auto *label : {m_localLabel, m_remoteLabel}) {
+        label->setTextFormat(Qt::PlainText);
+        label->setWordWrap(true);
+        label->setProperty("secondary", true);
+    }
     pathLayout->addWidget(new QLabel(QStringLiteral("本地目录："), this), 0, 0);
     pathLayout->addWidget(m_localLabel, 0, 1);
     pathLayout->addWidget(new QLabel(QStringLiteral("远程目录："), this), 1, 0);
@@ -203,6 +177,7 @@ void SyncDialog::buildUi()
     auto *options = new QHBoxLayout();
     options->setSpacing(12);
     m_directionCombo = new QComboBox(this);
+    m_directionCombo->setAccessibleName(QStringLiteral("同步方向"));
     m_directionCombo->addItem(QStringLiteral("本地 → 远程"),
                               static_cast<int>(SyncDirection::LocalToRemote));
     m_directionCombo->addItem(QStringLiteral("远程 → 本地"),
@@ -225,9 +200,7 @@ void SyncDialog::buildUi()
     auto *actionRow = new QHBoxLayout();
     m_compareButton = new QPushButton(QStringLiteral("开始比较"), this);
     m_compareButton->setIcon(IconProvider::instance().icon(QStringLiteral("sync")));
-    m_compareButton->setProperty("accent", true);
     m_syncButton = new QPushButton(QStringLiteral("同步"), this);
-    m_syncButton->setIcon(IconProvider::instance().icon(QStringLiteral("upload"), Qt::white));
     m_syncButton->setProperty("accent", true);
     m_closeButton = new QPushButton(QStringLiteral("关闭"), this);
     actionRow->addWidget(m_compareButton);
@@ -244,6 +217,7 @@ void SyncDialog::buildUi()
     layout->addWidget(m_progress);
 
     m_table = new QTableView(this);
+    m_table->setAccessibleName(QStringLiteral("同步预览"));
     m_model = new SyncResultModel(this);
     m_table->setModel(m_model);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -251,12 +225,12 @@ void SyncDialog::buildUi()
     m_table->setAlternatingRowColors(true);
     m_table->setShowGrid(false);
     m_table->setWordWrap(false);
+    m_table->setTextElideMode(Qt::ElideMiddle);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->verticalHeader()->setVisible(false);
     m_table->verticalHeader()->setDefaultSectionSize(26);
-    m_table->horizontalHeader()->setStretchLastSection(true);
+    m_table->horizontalHeader()->setSectionResizeMode(SyncResultModel::PathColumn, QHeaderView::Stretch);
     m_table->setColumnWidth(SyncResultModel::ActionColumn, 100);
-    m_table->setColumnWidth(SyncResultModel::PathColumn, 360);
     m_table->setColumnWidth(SyncResultModel::SizeColumn, 100);
     m_table->setColumnWidth(SyncResultModel::ModifiedColumn, 170);
     layout->addWidget(m_table, 1);

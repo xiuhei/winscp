@@ -2,7 +2,6 @@
 
 #include "core/Settings.h"
 #include "ui/IconProvider.h"
-#include "ui/Theme.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -29,15 +28,8 @@ PreferencesDialog::PreferencesDialog(QWidget *parent)
     resize(620, 580);
 
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(18, 16, 18, 14);
+    layout->setContentsMargins(16, 16, 16, 16);
     layout->setSpacing(12);
-
-    auto *title = new QLabel(QStringLiteral("首选项"), this);
-    QFont titleFont = title->font();
-    titleFont.setPointSize(10);
-    title->setObjectName(QStringLiteral("DialogHeading"));
-    title->setFont(titleFont);
-    layout->addWidget(title);
 
     auto *tabs = new QTabWidget(this);
     const Settings &settings = Settings::instance();
@@ -135,6 +127,7 @@ PreferencesDialog::PreferencesDialog(QWidget *parent)
     m_editorEdit->setPlaceholderText(QStringLiteral("例如：notepad.exe"));
     auto *browseButton = new QToolButton(editorRow);
     browseButton->setText(QStringLiteral("…"));
+    browseButton->setAccessibleName(QStringLiteral("选择编辑器"));
     browseButton->setFixedWidth(30);
     editorLayout->addWidget(m_editorEdit, 1);
     editorLayout->addWidget(browseButton);

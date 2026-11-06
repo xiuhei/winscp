@@ -104,7 +104,7 @@ public:
     {
         QColor color = m_color.isValid() ? m_color : Theme::iconColor();
         if (mode == QIcon::Disabled)
-            color = Theme::isDark() ? QColor(QStringLiteral("#a0a0a0")) : QColor(QStringLiteral("#8c939b"));
+            color = Theme::isDark() ? QColor(QStringLiteral("#a0a0a0")) : QColor(QStringLiteral("#909090"));
         return IconProvider::instance().pixmap(m_name, qMin(size.width(), size.height()), color, scale);
     }
     void paint(QPainter *painter, const QRect &rect, QIcon::Mode mode, QIcon::State state) override
@@ -499,16 +499,7 @@ QIcon IconProvider::fileIcon(const FileInfo &info, bool local, bool large)
                 return systemIcon;
         }
     }
-    if (info.isSymlink)
-        return icon(QStringLiteral("link"));
-    if (info.isDir)
-        return provider.icon(QFileIconProvider::Folder);
-    const QString key = info.iconKey();
-    if (key == QLatin1String("folder"))
-        return provider.icon(QFileIconProvider::Folder);
-    if (key == QLatin1String("file"))
-        return icon(QStringLiteral("file"));
-    return icon(key);
+    return icon(info.iconKey());
 }
 
 QIcon IconProvider::appIcon()

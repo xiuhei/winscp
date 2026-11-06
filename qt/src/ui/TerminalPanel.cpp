@@ -45,7 +45,7 @@ QToolButton *makeToolButton(QWidget *parent, const QString &iconName, const QStr
     button->setAccessibleName(tooltip);
     button->setAutoRaise(true);
     button->setFixedSize(26, 26);
-    button->setFocusPolicy(Qt::NoFocus);
+    button->setFocusPolicy(Qt::TabFocus);
     return button;
 }
 
@@ -77,7 +77,7 @@ void TerminalPanel::buildUi()
     auto *toolbar = new QFrame(this);
     toolbar->setObjectName(QStringLiteral("TerminalToolbar"));
     auto *toolbarLayout = new QHBoxLayout(toolbar);
-    toolbarLayout->setContentsMargins(6, 3, 6, 3);
+    toolbarLayout->setContentsMargins(8, 4, 8, 4);
     toolbarLayout->setSpacing(6);
     auto *icon = new QLabel(toolbar);
     icon->setObjectName(QStringLiteral("TerminalHeaderIcon"));
@@ -183,7 +183,6 @@ void TerminalPanel::buildWelcomePage()
     m_welcomeHint->setWordWrap(true);
     m_welcomeButton = new QPushButton(QStringLiteral("打开终端"), m_welcomePage);
     m_welcomeButton->setProperty("accent", true);
-    m_welcomeButton->setIcon(IconProvider::instance().icon(QStringLiteral("terminal")));
     auto *buttonRow = new QHBoxLayout();
     buttonRow->addStretch(1);
     buttonRow->addWidget(m_welcomeButton);
@@ -230,7 +229,7 @@ void TerminalPanel::updateHint()
         m_hintLabel->setText(m_session.endpoint() + QStringLiteral(" · 就绪"));
         m_hintLabel->setToolTip(m_session.url());
     } else {
-        m_hintLabel->setText(QStringLiteral("未连接 · 连接 SFTP/SCP 会话后可打开 SSH 终端"));
+        m_hintLabel->setText(QStringLiteral("未连接"));
         m_hintLabel->setToolTip(QString());
     }
 }
@@ -241,23 +240,18 @@ void TerminalPanel::updateWelcomeText()
         return;
     if (!m_session.hostName.isEmpty() && protocolUsesSsh(m_session.protocol)) {
         m_welcomeTitle->setText(QStringLiteral("SSH 终端"));
-        m_welcomeHint->setText(
-            QStringLiteral("点击下方按钮，为 %1 打开一个 SSH 终端。\n终端固定显示在界面下方。")
-                .arg(m_session.endpoint()));
+        m_welcomeHint->clear();
         m_welcomeButton->setText(QStringLiteral("打开终端"));
     } else if (!m_session.hostName.isEmpty()) {
         m_welcomeTitle->setText(QStringLiteral("当前协议不支持终端"));
-        m_welcomeHint->setText(
-            QStringLiteral("SSH 终端仅支持 SFTP 和 SCP 会话。当前协议：%1。")
-                .arg(protocolDisplayName(m_session.protocol)));
+        m_welcomeHint->setText(QStringLiteral("请连接 SFTP 或 SCP 会话。"));
         m_welcomeButton->setText(QStringLiteral("连接新会话"));
     } else {
         m_welcomeTitle->setText(QStringLiteral("SSH 终端"));
-        m_welcomeHint->setText(
-            QStringLiteral("先连接一个 SFTP 或 SCP 会话，然后在此打开终端。\n"
-                           "终端显示在文件管理器下方，可拖动分隔条调整高度。"));
+        m_welcomeHint->setText(QStringLiteral("请连接 SFTP 或 SCP 会话。"));
         m_welcomeButton->setText(QStringLiteral("连接服务器"));
     }
+    m_welcomeHint->setVisible(!m_welcomeHint->text().isEmpty());
 }
 
 void TerminalPanel::openTerminal()

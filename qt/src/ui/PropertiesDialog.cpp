@@ -2,7 +2,6 @@
 
 #include "core/PathUtils.h"
 #include "ui/IconProvider.h"
-#include "ui/Theme.h"
 
 #include <QCheckBox>
 #include <QDialogButtonBox>
@@ -36,15 +35,17 @@ PropertiesDialog::PropertiesDialog(const FileInfo &info, bool remote, bool canEd
     auto *header = new QHBoxLayout();
     header->setSpacing(12);
     auto *icon = new QLabel(this);
-    icon->setPixmap(IconProvider::instance().fileIcon(info, !remote).pixmap(48, 48));
+    icon->setPixmap(IconProvider::instance().fileIcon(info, !remote).pixmap(32, 32));
     auto *name = new QLabel(info.name, this);
+    name->setTextFormat(Qt::PlainText);
+    name->setWordWrap(true);
     QFont nameFont = name->font();
     nameFont.setPointSize(13);
     name->setObjectName(QStringLiteral("DialogHeading"));
     name->setFont(nameFont);
     name->setTextInteractionFlags(Qt::TextSelectableByMouse);
     auto *type = new QLabel(info.typeDescription(), this);
-    type->setStyleSheet(QStringLiteral("color: %1;").arg(Theme::muted().name()));
+    type->setProperty("secondary", true);
     auto *nameColumn = new QVBoxLayout();
     nameColumn->setSpacing(2);
     nameColumn->addWidget(name);
@@ -59,6 +60,7 @@ PropertiesDialog::PropertiesDialog(const FileInfo &info, bool remote, bool canEd
     form->setSpacing(8);
     auto addValue = [&](const QString &label, const QString &value) {
         auto *field = new QLabel(value.isEmpty() ? QStringLiteral("—") : value, details);
+        field->setTextFormat(Qt::PlainText);
         field->setTextInteractionFlags(Qt::TextSelectableByMouse);
         field->setWordWrap(true);
         form->addRow(label, field);
@@ -83,10 +85,10 @@ PropertiesDialog::PropertiesDialog(const FileInfo &info, bool remote, bool canEd
         auto *grid = new QGridLayout();
         grid->setHorizontalSpacing(24);
         grid->setVerticalSpacing(8);
-        grid->addWidget(new QLabel(QStringLiteral(""), permissions), 0, 0);
-        grid->addWidget(new QLabel(QStringLiteral("读取"), permissions), 0, 1);
-        grid->addWidget(new QLabel(QStringLiteral("写入"), permissions), 0, 2);
-        grid->addWidget(new QLabel(QStringLiteral("执行"), permissions), 0, 3);
+        const QStringList actions = {QStringLiteral("读取"), QStringLiteral("写入"),
+                                     QStringLiteral("执行")};
+        for (int column = 0; column < actions.size(); ++column)
+            grid->addWidget(new QLabel(actions.at(column), permissions), 0, column + 1);
         const QStringList rows = {QStringLiteral("所有者"), QStringLiteral("用户组"),
                                   QStringLiteral("其他")};
         const quint32 mode = info.mode != 0 ? info.mode
@@ -95,6 +97,7 @@ PropertiesDialog::PropertiesDialog(const FileInfo &info, bool remote, bool canEd
             grid->addWidget(new QLabel(rows.at(row), permissions), row + 1, 0);
             for (int column = 0; column < 3; ++column) {
                 auto *check = new QCheckBox(permissions);
+                check->setAccessibleName(rows.at(row) + QLatin1Char(' ') + actions.at(column));
                 const int shift = (2 - row) * 3 + (2 - column);
                 check->setChecked((mode >> shift) & 1);
                 connect(check, &QCheckBox::toggled, this,
@@ -115,27 +118,16 @@ PropertiesDialog::PropertiesDialog(const FileInfo &info, bool remote, bool canEd
         permissionLayout->addLayout(octalRow);
         layout->addWidget(permissions);
         updatePermissionText();
-        if (remote) {
-            auto *note = new QLabel(
-                QStringLiteral("提示：SFTP 和部分 FTP 服务器支持 Unix 权限。修改后立即生效。"),
-                permissions);
-            note->setStyleSheet(QStringLiteral("color: %1; font-size: 9pt;").arg(Theme::muted().name()));
-            note->setWordWrap(true);
-            permissionLayout->addWidget(note);
-        }
     }
 
     layout->addStretch(1);
     auto *buttons = new QDialogButtonBox(this);
     if (m_canEditPermissions) {
-        buttons->addButton(QStringLiteral("保存"), QDialogButtonBox::AcceptRole);
+        auto *save = buttons->addButton(QStringLiteral("保存"), QDialogButtonBox::AcceptRole);
+        save->setProperty("accent", true);
         buttons->addButton(QStringLiteral("取消"), QDialogButtonBox::RejectRole);
     } else {
         buttons->addButton(QStringLiteral("关闭"), QDialogButtonBox::RejectRole);
-    }
-    for (QPushButton *button : buttons->findChildren<QPushButton *>()) {
-        if (button->text() == QLatin1String("保存"))
-            button->setProperty("accent", true);
     }
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);

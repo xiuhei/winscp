@@ -26,18 +26,15 @@ LoginDialog::LoginDialog(const SessionData &initial, QWidget *parent)
     setObjectName(QStringLiteral("LoginDialog"));
     setWindowTitle(QStringLiteral("登录 - WinSCP Qt"));
     setWindowIcon(IconProvider::instance().appIcon());
-    resize(900, 560);
-    setMinimumSize(760, 480);
+    resize(816, 520);
+    setMinimumSize(680, 448);
     SiteStore::instance().load();
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(18, 16, 18, 14);
-    layout->setSpacing(14);
+    layout->setContentsMargins(24, 20, 24, 16);
+    layout->setSpacing(12);
     auto *heading = new QLabel(QStringLiteral("连接到服务器"), this);
     heading->setObjectName(QStringLiteral("LoginHeading"));
     layout->addWidget(heading);
-    auto *description = new QLabel(QStringLiteral("选择已保存的站点，或输入服务器信息开始连接。"), this);
-    description->setObjectName(QStringLiteral("LoginDescription"));
-    layout->addWidget(description);
     auto *splitter = new QSplitter(Qt::Horizontal, this);
     splitter->setChildrenCollapsible(false);
     auto *left = new QWidget(splitter);
@@ -50,7 +47,8 @@ LoginDialog::LoginDialog(const SessionData &initial, QWidget *parent)
     m_sites = new QListWidget(left);
     m_sites->setObjectName(QStringLiteral("LoginSites"));
     m_sites->setAccessibleName(QStringLiteral("已保存的站点"));
-    m_sites->setIconSize(QSize(20, 20));
+    m_sites->setIconSize(QSize(16, 16));
+    m_sites->setTextElideMode(Qt::ElideMiddle);
     m_sites->setFrameShape(QFrame::StyledPanel);
     leftLayout->addWidget(m_sites, 1);
     m_deleteButton = new QPushButton(QStringLiteral("删除站点(&D)"), left);
@@ -66,11 +64,11 @@ LoginDialog::LoginDialog(const SessionData &initial, QWidget *parent)
     splitter->addWidget(scroll);
     splitter->setStretchFactor(0, 0);
     splitter->setStretchFactor(1, 1);
-    splitter->setSizes({280, 590});
+    splitter->setSizes({256, 512});
     layout->addWidget(splitter, 1);
     auto *buttons = new QDialogButtonBox(this);
     auto *login = buttons->addButton(QStringLiteral("登录(&L)"), QDialogButtonBox::AcceptRole);
-    login->setObjectName(QStringLiteral("LoginButton"));
+    login->setProperty("accent", true);
     login->setDefault(true);
     buttons->addButton(QStringLiteral("关闭"), QDialogButtonBox::RejectRole);
     auto *startup = new QCheckBox(QStringLiteral("启动和关闭最后会话时显示此窗口(&S)"), this);
@@ -172,6 +170,7 @@ void LoginDialog::saveSite()
     layout->addWidget(password);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("确定"));
+    buttons->button(QDialogButtonBox::Ok)->setProperty("accent", true);
     buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
     layout->addWidget(buttons);
     connect(name, &QLineEdit::textChanged, &dialog, [buttons](const QString &value) {
@@ -181,6 +180,7 @@ void LoginDialog::saveSite()
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     name->selectAll();
     name->setFocus();
+    dialog.adjustSize();
     if (dialog.exec() != QDialog::Accepted)
         return;
     const QString chosen = name->text().trimmed();

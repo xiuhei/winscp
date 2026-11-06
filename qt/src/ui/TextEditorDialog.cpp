@@ -53,17 +53,19 @@ TextEditorDialog::TextEditorDialog(const QString &remotePath, const QByteArray &
     auto *icon = new QLabel(this);
     icon->setPixmap(IconProvider::instance().icon(QStringLiteral("text")).pixmap(24, 24));
     auto *pathLabel = new QLabel(remotePath, this);
-    pathLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    pathLabel->setStyleSheet(QStringLiteral("color: %1;").arg(Theme::muted().name()));
+    pathLabel->setTextFormat(Qt::PlainText);
+    pathLabel->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+    pathLabel->setWordWrap(true);
+    pathLabel->setProperty("secondary", true);
     m_modifiedLabel = new QLabel(this);
-    m_modifiedLabel->setStyleSheet(QStringLiteral("color: %1; font-weight: 600;")
-                                       .arg(Theme::accent().name()));
+    m_modifiedLabel->setObjectName(QStringLiteral("DialogHeading"));
     auto *findButton = new QToolButton(this);
     findButton->setIcon(IconProvider::instance().icon(QStringLiteral("search")));
     findButton->setToolTip(QStringLiteral("查找 (Ctrl+F)"));
+    findButton->setAccessibleName(findButton->toolTip());
     findButton->setAutoRaise(true);
     auto *reloadInfo = new QLabel(QStringLiteral("UTF-8"), this);
-    reloadInfo->setStyleSheet(QStringLiteral("color: %1; font-size: 9pt;").arg(Theme::muted().name()));
+    reloadInfo->setProperty("secondary", true);
     toolbar->addWidget(icon);
     toolbar->addWidget(pathLabel, 1);
     toolbar->addWidget(m_modifiedLabel);
@@ -77,12 +79,15 @@ TextEditorDialog::TextEditorDialog(const QString &remotePath, const QByteArray &
     findLayout->setSpacing(6);
     m_findEdit = new QLineEdit(m_findBar);
     m_findEdit->setPlaceholderText(QStringLiteral("查找文本…"));
+    m_findEdit->setAccessibleName(QStringLiteral("查找文本"));
     auto *previousButton = new QToolButton(m_findBar);
     previousButton->setText(QStringLiteral("上一个"));
     auto *nextButton = new QToolButton(m_findBar);
     nextButton->setText(QStringLiteral("下一个"));
     auto *closeFindButton = new QToolButton(m_findBar);
     closeFindButton->setIcon(IconProvider::instance().icon(QStringLiteral("close")));
+    closeFindButton->setToolTip(QStringLiteral("关闭查找"));
+    closeFindButton->setAccessibleName(closeFindButton->toolTip());
     findLayout->addWidget(m_findEdit, 1);
     findLayout->addWidget(previousButton);
     findLayout->addWidget(nextButton);
@@ -108,7 +113,7 @@ TextEditorDialog::TextEditorDialog(const QString &remotePath, const QByteArray &
     auto *sizeLabel = new QLabel(
         QStringLiteral("%1 · %2 行").arg(path::formatSize(data.size())).arg(m_editor->document()->blockCount()),
         this);
-    sizeLabel->setStyleSheet(QStringLiteral("color: %1;").arg(Theme::muted().name()));
+    sizeLabel->setProperty("secondary", true);
     statusRow->addWidget(m_statusLabel, 1);
     statusRow->addWidget(sizeLabel);
     layout->addLayout(statusRow);
@@ -123,7 +128,7 @@ TextEditorDialog::TextEditorDialog(const QString &remotePath, const QByteArray &
     connect(buttons, &QDialogButtonBox::accepted, this, &TextEditorDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &TextEditorDialog::reject);
     connect(m_editor->document(), &QTextDocument::modificationChanged, this, [this](bool modified) {
-        m_modifiedLabel->setText(modified ? QStringLiteral("● 未保存") : QString());
+        m_modifiedLabel->setText(modified ? QStringLiteral("未保存") : QString());
         setWindowTitle(QStringLiteral("%1%2 - 编辑器")
                            .arg(path::remoteName(m_path), modified ? QStringLiteral(" *") : QString()));
     });

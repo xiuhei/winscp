@@ -22,29 +22,29 @@ struct ColorToken {
 };
 
 constexpr ColorToken colors[] = {
-    {"window", "#f3f5f7", "#292929"},
-    {"surface", "#f9fafb", "#242424"},
-    {"base", "#ffffff", "#1f1f1f"},
-    {"border", "#d5dbe3", "#454545"},
-    {"text", "#24303f", "#dedede"},
-    {"muted", "#657386", "#b6b6b6"},
-    {"hover", "#e9edf1", "#303030"},
-    {"pressed", "#dfe7ef", "#3a3a3a"},
-    {"focus", "#8190a0", "#878787"},
-    {"disabled", "#9ba5b0", "#858585"},
-    {"selection", "#dceafa", "#414141"},
-    {"selection-text", "#173d64", "#f0f0f0"},
-    {"inactive", "#e9edf2", "#343434"},
-    {"active-header", "#eef2f6", "#2a2a2a"},
-    {"primary", "#2468a4", "#dedede"},
-    {"primary-hover", "#1c5890", "#f0f0f0"},
-    {"primary-pressed", "#174c7b", "#b6b6b6"},
-    {"primary-text", "#ffffff", "#1f1f1f"},
+    {"window", "#f0f0f0", "#191919"},
+    {"surface", "#f6f6f6", "#242424"},
+    {"base", "#fcfcfc", "#202020"},
+    {"border", "#d4d4d4", "#414141"},
+    {"text", "#202020", "#ececec"},
+    {"muted", "#595959", "#b8b8b8"},
+    {"hover", "#eaeaea", "#303030"},
+    {"pressed", "#dedede", "#3a3a3a"},
+    {"focus", "#696969", "#a0a0a0"},
+    {"disabled", "#828282", "#858585"},
+    {"selection", "#dddddd", "#454545"},
+    {"selection-text", "#171717", "#f0f0f0"},
+    {"inactive", "#eeeeee", "#333333"},
+    {"active-header", "#ebebeb", "#2d2d2d"},
+    {"primary", "#282828", "#e5e5e5"},
+    {"primary-hover", "#404040", "#f3f3f3"},
+    {"primary-pressed", "#181818", "#c7c7c7"},
+    {"primary-text", "#fafafa", "#1f1f1f"},
     {"terminal", "#181818", "#181818"},
-    {"accent", "#0066b8", "#dedede"},
-    {"icon", "#465a71", "#f0f0f0"},
-    {"danger", "#c0392b", "#e06c75"},
-    {"success", "#2e8b57", "#56c596"},
+    {"accent", "#484848", "#dedede"},
+    {"icon", "#4b4b4b", "#f0f0f0"},
+    {"danger", "#a92d28", "#f08389"},
+    {"success", "#246f48", "#75cc9f"},
 };
 
 QColor color(const char *name)
@@ -117,6 +117,7 @@ void Theme::apply(const QString &name)
         palette.setColor(QPalette::WindowText, text());
         palette.setColor(QPalette::Base, paneBackground());
         palette.setColor(QPalette::AlternateBase, color("surface"));
+        palette.setColor(QPalette::Midlight, color("border"));
         palette.setColor(QPalette::Text, text());
         palette.setColor(QPalette::Button, color("surface"));
         palette.setColor(QPalette::ButtonText, text());

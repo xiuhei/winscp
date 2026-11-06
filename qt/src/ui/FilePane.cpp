@@ -139,7 +139,7 @@ QToolButton *makeToolButton(QWidget *parent, const QString &iconName, const QStr
     button->setAccessibleName(tooltip);
     button->setAutoRaise(true);
     button->setFixedSize(26, 26);
-    button->setFocusPolicy(Qt::NoFocus);
+    button->setFocusPolicy(Qt::TabFocus);
     return button;
 }
 
@@ -238,24 +238,22 @@ void FilePane::buildUi()
     auto *header = new QFrame(this);
     header->setObjectName(QStringLiteral("PaneHeader"));
     auto *headerLayout = new QVBoxLayout(header);
-    headerLayout->setContentsMargins(6, 4, 6, 3);
-    headerLayout->setSpacing(2);
+    headerLayout->setContentsMargins(8, 4, 8, 4);
+    headerLayout->setSpacing(4);
 
     auto *titleRow = new QHBoxLayout();
     titleRow->setSpacing(4);
     m_badgeLabel = new QLabel(header);
     m_badgeLabel->setObjectName(QStringLiteral("PaneBadge"));
-    m_badgeLabel->setText(m_role == Role::Local ? QStringLiteral("本地") : QStringLiteral("远程"));
-    if (m_role == Role::Remote)
-        m_badgeLabel->setProperty("role", QStringLiteral("remote"));
+    m_badgeLabel->hide();
     m_titleLabel = new QLabel(header);
     m_titleLabel->setObjectName(QStringLiteral("PaneTitle"));
     m_titleLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     m_titleLabel->setText(m_role == Role::Local ? QStringLiteral("本地文件")
                                                 : QStringLiteral("远程文件"));
 
-    titleRow->addWidget(m_badgeLabel);
     titleRow->addWidget(m_titleLabel, 1);
+    titleRow->addWidget(m_badgeLabel);
 
     m_terminalButton = makeToolButton(header, QStringLiteral("terminal"), QStringLiteral("在终端中打开"));
     m_hiddenButton = makeToolButton(header, QStringLiteral("eye-off"), QStringLiteral("显示隐藏文件"));
@@ -322,7 +320,8 @@ void FilePane::buildUi()
     m_breadcrumbs = new QLabel(m_pathStack);
     m_breadcrumbs->setObjectName(QStringLiteral("PathBreadcrumbs"));
     m_breadcrumbs->setTextFormat(Qt::RichText);
-    m_breadcrumbs->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
+    m_breadcrumbs->setTextInteractionFlags(Qt::LinksAccessibleByMouse | Qt::LinksAccessibleByKeyboard);
+    m_breadcrumbs->setAccessibleName(QStringLiteral("当前路径"));
     m_breadcrumbs->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     m_breadcrumbs->setMargin(3);
     m_pathStack->addWidget(m_breadcrumbs);
@@ -360,6 +359,8 @@ void FilePane::buildUi()
     auto *view = new FileTableView(tablePage);
     m_table = view;
     m_table->setObjectName(QStringLiteral("FileTable"));
+    m_table->setAccessibleName(m_role == Role::Local ? QStringLiteral("本地文件")
+                                                     : QStringLiteral("远程文件"));
     m_table->setAlternatingRowColors(false);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::ExtendedSelection);
@@ -386,28 +387,24 @@ void FilePane::buildUi()
     m_stack->addWidget(tablePage);
 
     m_emptyLabel = new QLabel(QStringLiteral("此文件夹为空"), m_table->viewport());
+    m_emptyLabel->setObjectName(QStringLiteral("EmptyState"));
     m_emptyLabel->setAlignment(Qt::AlignCenter);
     m_emptyLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
-    m_emptyLabel->setStyleSheet(QStringLiteral("color: %1; background: transparent; font-size: 9pt;")
-                                  .arg(Theme::muted().name()));
     m_emptyLabel->hide();
 
     buildWelcomePage();
     outer->addWidget(m_stack, 1);
 
-    auto *footerLine = new QFrame(this);
-    footerLine->setObjectName(QStringLiteral("PaneFooterLine"));
-    footerLine->setFrameShape(QFrame::NoFrame);
-    outer->addWidget(footerLine);
-
-    auto *footer = new QWidget(this);
+    auto *footer = new QFrame(this);
+    footer->setObjectName(QStringLiteral("PaneFooterBar"));
     auto *footerLayout = new QHBoxLayout(footer);
-    footerLayout->setContentsMargins(6, 4, 6, 4);
+    footerLayout->setContentsMargins(8, 4, 8, 4);
     footerLayout->setSpacing(8);
     m_filterEdit = new QLineEdit(footer);
     m_filterEdit->setObjectName(QStringLiteral("FilterEdit"));
     m_filterEdit->setAccessibleName(QStringLiteral("筛选文件"));
-    m_filterEdit->setPlaceholderText(QStringLiteral("筛选，例如 *.log"));
+    m_filterEdit->setPlaceholderText(QStringLiteral("筛选文件"));
+    m_filterEdit->setToolTip(QStringLiteral("支持通配符，例如 *.log"));
     m_filterEdit->setClearButtonEnabled(true);
     m_filterEdit->setFixedWidth(150);
     m_filterEdit->addAction(IconProvider::instance().icon(QStringLiteral("search"), Theme::muted()),
@@ -594,17 +591,17 @@ void FilePane::buildWelcomePage()
     m_welcomeIcon->setAlignment(Qt::AlignCenter);
     layout->addWidget(m_welcomeIcon);
 
-    m_welcomeTitle = new QLabel(QStringLiteral("连接到远程服务器"), m_welcomePage);
+    m_welcomeTitle = new QLabel(QStringLiteral("未连接"), m_welcomePage);
     m_welcomeTitle->setObjectName(QStringLiteral("WelcomeTitle"));
     m_welcomeTitle->setAlignment(Qt::AlignCenter);
     layout->addWidget(m_welcomeTitle);
 
-    m_welcomeText = new QLabel(
-        QStringLiteral("使用 SFTP、SCP、FTP、FTPS 或 WebDAV 管理远程文件。\n连接后可在下方打开 SSH 终端。"),
-        m_welcomePage);
+    m_welcomeText = new QLabel(m_welcomePage);
     m_welcomeText->setObjectName(QStringLiteral("WelcomeText"));
     m_welcomeText->setAlignment(Qt::AlignCenter);
     m_welcomeText->setWordWrap(true);
+    m_welcomeText->setTextFormat(Qt::PlainText);
+    m_welcomeText->hide();
     layout->addWidget(m_welcomeText);
 
     auto *buttonRow = new QHBoxLayout();
@@ -612,7 +609,6 @@ void FilePane::buildWelcomePage()
     buttonRow->addStretch(1);
     m_newSessionButton = new QPushButton(QStringLiteral("新建会话"), m_welcomePage);
     m_newSessionButton->setProperty("accent", true);
-    m_newSessionButton->setIcon(IconProvider::instance().icon(QStringLiteral("connect")));
     m_siteManagerButton = new QPushButton(QStringLiteral("站点管理器"), m_welcomePage);
     m_siteManagerButton->setIcon(IconProvider::instance().icon(QStringLiteral("site")));
     buttonRow->addWidget(m_newSessionButton);
@@ -629,12 +625,7 @@ void FilePane::buildWelcomePage()
 
 void FilePane::applyRoleStyle()
 {
-    if (m_role == Role::Remote) {
-        m_badgeLabel->setProperty("role", QStringLiteral("remote"));
-        m_welcomePage->setVisible(true);
-    } else {
-        m_welcomePage->setVisible(false);
-    }
+    m_welcomePage->setVisible(isRemote());
     m_hiddenButton->setIcon(IconProvider::instance().icon(
         m_showHidden ? QStringLiteral("eye") : QStringLiteral("eye-off")));
     m_hiddenButton->setToolTip(m_showHidden ? QStringLiteral("隐藏隐藏文件")
@@ -683,7 +674,6 @@ void FilePane::setRemoteSession(const SessionData &session)
     m_session = session;
     if (m_role != Role::Remote)
         return;
-    m_badgeLabel->setText(protocolDisplayName(session.protocol));
     m_titleLabel->setText(session.rootLabel());
     m_titleLabel->setToolTip(session.url());
     m_connectButton->hide();
@@ -705,14 +695,14 @@ void FilePane::setRemoteConnecting(const SessionData &session)
     m_historyIndex = -1;
     m_connecting = true;
     m_remoteConnected = false;
-    m_badgeLabel->setText(QStringLiteral("连接中"));
+    m_badgeLabel->hide();
     m_titleLabel->setText(session.displayName());
     m_connectButton->setEnabled(false);
     m_connectButton->show();
     m_disconnectButton->hide();
     m_terminalButton->hide();
     m_pathCombo->setEnabled(false);
-    showWelcome(true, QStringLiteral("正在连接 %1 …").arg(session.endpoint()));
+    showWelcome(true, session.endpoint());
     setLoading(true, QString());
 }
 
@@ -744,7 +734,7 @@ void FilePane::showRemoteConnectFailed(const QString &message)
     m_connectButton->show();
     m_connectButton->setEnabled(true);
     m_disconnectButton->hide();
-    m_badgeLabel->setText(QStringLiteral("连接失败"));
+    m_badgeLabel->hide();
     m_titleLabel->setText(QStringLiteral("远程文件"));
     m_stack->setCurrentWidget(m_welcomePage);
     showWelcome(false, message);
@@ -769,16 +759,14 @@ void FilePane::showRemoteDisconnected(const QString &reason)
     m_pathCombo->setEditText(QString());
     m_breadcrumbs->clear();
     m_pathCombo->setEnabled(false);
-    m_badgeLabel->setText(QStringLiteral("远程"));
+    m_badgeLabel->hide();
     m_titleLabel->setText(QStringLiteral("远程文件"));
     m_titleLabel->setToolTip(QString());
     m_connectButton->show();
     m_connectButton->setEnabled(true);
     m_disconnectButton->hide();
     m_terminalButton->hide();
-    showWelcome(false, reason.isEmpty()
-                             ? QStringLiteral("选择“新建会话”，或使用站点管理器连接服务器。")
-                             : reason);
+    showWelcome(false, reason);
     setLoading(false);
     updateNavigationButtons();
     if (!reason.isEmpty())
@@ -803,24 +791,14 @@ QString FilePane::title() const
 void FilePane::showWelcome(bool connecting, const QString &message)
 {
     m_stack->setCurrentWidget(m_welcomePage);
-    if (connecting) {
-        m_welcomeTitle->setText(QStringLiteral("正在连接…"));
-        m_welcomeText->setText(message.isEmpty() ? QStringLiteral("正在建立安全连接，请稍候。") : message);
-        m_newSessionButton->hide();
-        m_siteManagerButton->hide();
-        m_welcomeIcon->setPixmap(
-            IconProvider::instance().icon(QStringLiteral("sync"), Theme::accent()).pixmap(24, 24));
-    } else {
-        m_welcomeTitle->setText(QStringLiteral("连接到远程服务器"));
-        m_welcomeText->setText(message.isEmpty()
-                                   ? QStringLiteral("使用 SFTP、SCP、FTP、FTPS 或 WebDAV 管理远程文件。\n"
-                                                    "连接后可在下方打开 SSH 终端。")
-                                   : message);
-        m_newSessionButton->show();
-        m_siteManagerButton->show();
-        m_welcomeIcon->setPixmap(
-            IconProvider::instance().icon(QStringLiteral("connect"), Theme::accent()).pixmap(24, 24));
-    }
+    m_welcomeTitle->setText(connecting ? QStringLiteral("正在连接…") : QStringLiteral("未连接"));
+    m_welcomeText->setText(message);
+    m_welcomeText->setVisible(!message.isEmpty());
+    m_newSessionButton->setVisible(!connecting);
+    m_siteManagerButton->setVisible(!connecting);
+    m_welcomeIcon->setPixmap(IconProvider::instance()
+        .icon(connecting ? QStringLiteral("sync") : QStringLiteral("connect"), Theme::accent())
+        .pixmap(QSize(24, 24), devicePixelRatioF()));
 }
 
 void FilePane::showTablePage()
@@ -1128,11 +1106,10 @@ void FilePane::updateFileIconTheme()
                                   m_model->index(m_model->rowCount() - 1,
                                                  FileTableModel::ColumnCount - 1));
     }
-    m_emptyLabel->setStyleSheet(QStringLiteral("color: %1; background: transparent; font-size: 9pt;")
-                                    .arg(Theme::muted().name()));
     m_filterEdit->actions().first()->setIcon(
         IconProvider::instance().icon(QStringLiteral("search"), Theme::muted()));
-    m_welcomeIcon->setPixmap(IconProvider::instance().icon(QStringLiteral("connect"), Theme::accent())
+    m_welcomeIcon->setPixmap(IconProvider::instance()
+                                .icon(m_connecting ? QStringLiteral("sync") : QStringLiteral("connect"), Theme::accent())
                                 .pixmap(QSize(24, 24), devicePixelRatioF()));
     updateBreadcrumbs(isRemote() ? m_remotePath : localDisplay(m_localPath));
 }
@@ -1175,11 +1152,11 @@ void FilePane::updateHeader()
             return;
         }
         m_badgeLabel->setText(protocolDisplayName(m_session.protocol));
+        m_badgeLabel->show();
         m_titleLabel->setText(m_session.rootLabel());
         m_titleLabel->setToolTip(m_session.url());
         m_pathCombo->setEnabled(true);
     } else {
-        m_badgeLabel->setText(QStringLiteral("本地"));
         m_titleLabel->setText(QStringLiteral("本地文件"));
         m_titleLabel->setToolTip(localDisplay(m_localPath));
     }

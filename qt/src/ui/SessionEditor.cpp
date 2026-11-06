@@ -79,9 +79,8 @@ void SessionEditor::buildUi()
     label(QStringLiteral("密码(&P)"), passwordRow, 4, 1, 2);
     passwordRow->setFocusProxy(m_passwordEdit);
     auto *save = new QPushButton(QStringLiteral("保存(&S)…"), connection);
-    save->setObjectName(QStringLiteral("SaveSiteButton"));
     save->setAutoDefault(false);
-    auto *advanced = new QPushButton(QStringLiteral("高级(&A)…"), connection);
+    auto *advanced = new QPushButton(QStringLiteral("高级设置(&A)"), connection);
     advanced->setObjectName(QStringLiteral("SessionAdvancedButton"));
     advanced->setCheckable(true);
     advanced->setAutoDefault(false);
@@ -102,6 +101,7 @@ void SessionEditor::buildUi()
     auto *browse = new QToolButton(m_keyRow);
     browse->setText(QStringLiteral("…"));
     browse->setToolTip(QStringLiteral("选择私钥文件"));
+    browse->setAccessibleName(browse->toolTip());
     keyLayout->addWidget(m_keyEdit, 1);
     keyLayout->addWidget(browse);
     m_optionsForm->addRow(QStringLiteral("私钥文件"), m_keyRow);
