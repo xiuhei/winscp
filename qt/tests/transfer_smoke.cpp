@@ -161,8 +161,6 @@ int main(int argc, char *argv[])
     std::printf("upload verified: %lld + %lld bytes\n",
                 static_cast<long long>(payload.size() + 1), 8192LL);
 
-    manager.clearFinished();
-
     FileInfo remoteFile;
     remoteFile.name = QStringLiteral("hello.txt");
     remoteFile.path = QStringLiteral("/hello.txt");

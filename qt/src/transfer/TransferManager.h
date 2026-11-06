@@ -49,8 +49,6 @@ public:
                         const QString &localDirectory);
     void cancelTask(int id);
     void cancelAll();
-    void clearFinished();
-    void clearAll();
     void shutdown();
 
 signals:
@@ -81,6 +79,7 @@ private:
         std::atomic_bool *cancel = nullptr;
     };
 
+    void enqueue(const TaskPtr &task);
     void startQueued();
     void runTask(TaskPtr task);
     void finishTask(TaskPtr task, TransferStatus status, const QString &message);

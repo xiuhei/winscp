@@ -201,10 +201,9 @@ void SessionWorkspace::buildActions()
     m_showHiddenAction->setCheckable(true);
     m_showHiddenAction->setChecked(Settings::instance().showHiddenFiles);
 
-    m_queueAction = new QAction(QStringLiteral("显示传输队列(&Q)"), this);
+    m_queueAction = new QAction(QStringLiteral("显示传输进度(&Q)"), this);
     m_queueAction->setIcon(IconProvider::instance().icon(QStringLiteral("queue")));
     m_queueAction->setCheckable(true);
-    m_clearQueueAction = makeAction(QStringLiteral("清空已完成任务"), QStringLiteral("clear"));
     m_cancelTransfersAction = makeAction(QStringLiteral("取消所有传输"), QStringLiteral("stop"));
 
     m_themeDarkAction = new QAction(QStringLiteral("深色主题"), this);
@@ -276,10 +275,6 @@ void SessionWorkspace::buildActions()
         m_remotePane->setShowHidden(checked);
     });
     connect(m_queueAction, &QAction::toggled, this, &SessionWorkspace::showTransferQueue);
-    connect(m_clearQueueAction, &QAction::triggered, this, [this] {
-        m_transferManager->clearFinished();
-        updateTransferSummary();
-    });
     connect(m_cancelTransfersAction, &QAction::triggered, this, [this] {
         m_transferManager->cancelAll();
         showStatus(QStringLiteral("已请求取消所有传输。"));
@@ -368,7 +363,6 @@ void SessionWorkspace::buildMenus()
 
     QMenu *transferMenu = menuBar()->addMenu(QStringLiteral("传输(&T)"));
     transferMenu->addAction(m_queueAction);
-    transferMenu->addAction(m_clearQueueAction);
     transferMenu->addAction(m_cancelTransfersAction);
 
     QMenu *viewMenu = menuBar()->addMenu(QStringLiteral("视图(&V)"));
@@ -520,7 +514,19 @@ void SessionWorkspace::connectSignals()
     });
     connect(m_transferManager, &TransferManager::allTransfersFinished, this, [this] {
         updateTransferSummary();
-        showStatus(QStringLiteral("所有传输任务已完成。"));
+        const auto rows = m_transferManager->model()->rows();
+        const bool failed = std::any_of(rows.cbegin(), rows.cend(), [](const TransferRow &row) {
+            return row.status == TransferStatus::Failed;
+        });
+        const bool cancelled = std::any_of(rows.cbegin(), rows.cend(), [](const TransferRow &row) {
+            return row.status == TransferStatus::Cancelled;
+        });
+        if (failed)
+            showStatus(QStringLiteral("传输失败，详情见传输进度。"), true);
+        else if (cancelled)
+            showStatus(QStringLiteral("传输已取消。"));
+        else
+            showStatus(QStringLiteral("传输已完成。"));
         m_localPane->refresh();
         if (m_connected)
             m_remotePane->refresh();
@@ -1245,7 +1251,6 @@ void SessionWorkspace::updateActions()
     m_deleteAction->setEnabled(paneReady && !selected.isEmpty());
     m_propertiesAction->setEnabled(paneReady && selected.size() == 1);
     m_refreshAction->setEnabled(pane != nullptr);
-    m_clearQueueAction->setEnabled(m_transferManager && m_transferManager->model()->rowCount() > 0);
     m_cancelTransfersAction->setEnabled(m_transferManager &&
                                         m_transferManager->model()->activeCount() > 0);
 
@@ -1373,7 +1378,6 @@ void SessionWorkspace::updateActionIcons()
     setIcon(m_refreshAction, QStringLiteral("refresh"));
     setIcon(m_preferencesAction, QStringLiteral("settings"));
     setIcon(m_exitAction, QStringLiteral("close"));
-    setIcon(m_clearQueueAction, QStringLiteral("clear"));
     setIcon(m_cancelTransfersAction, QStringLiteral("stop"));
     setIcon(m_queueAction, QStringLiteral("queue"));
     setIcon(m_shortcutsAction, QStringLiteral("terminal"));

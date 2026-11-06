@@ -138,7 +138,6 @@ private:
     QAction *m_exitAction = nullptr;
     QAction *m_showHiddenAction = nullptr;
     QAction *m_queueAction = nullptr;
-    QAction *m_clearQueueAction = nullptr;
     QAction *m_cancelTransfersAction = nullptr;
     QAction *m_shortcutsAction = nullptr;
     QAction *m_logAction = nullptr;

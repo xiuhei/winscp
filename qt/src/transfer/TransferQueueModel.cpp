@@ -2,8 +2,6 @@
 
 #include "core/PathUtils.h"
 
-#include <QLocale>
-
 namespace wsc {
 
 TransferQueueModel::TransferQueueModel(QObject *parent)
@@ -30,10 +28,9 @@ QVariant TransferQueueModel::data(const QModelIndex &index, int role) const
 
     if (role == TaskIdRole)
         return row.id;
+    const bool hasProgress = row.bytesTotal >= 0 || row.status == TransferStatus::Completed;
     if (role == ProgressRole)
-        return row.progress();
-    if (role == StatusRole)
-        return static_cast<int>(row.status);
+        return hasProgress ? QVariant(row.progress()) : QVariant();
     if (role == CanCancelRole)
         return row.canCancel &&
             (row.status == TransferStatus::Queued || row.status == TransferStatus::Running);
@@ -46,16 +43,16 @@ QVariant TransferQueueModel::data(const QModelIndex &index, int role) const
         case DirectionColumn:
             return transferDirectionName(row.direction);
         case ProgressColumn:
-            return QStringLiteral("%1%").arg(static_cast<int>(row.progress() * 100.0));
+            return hasProgress ? QStringLiteral("%1%").arg(qRound(row.progress() * 100.0))
+                               : QStringLiteral("—");
         case SizeColumn:
             return path::formatSize(row.bytesTotal);
         case SpeedColumn:
             return row.status == TransferStatus::Running ? path::formatSpeed(row.speed)
                                                          : QStringLiteral("—");
         case StatusColumn:
-            return row.message.isEmpty() ? transferStatusName(row.status) : row.message;
-        case TargetColumn:
-            return row.target;
+            return row.status == TransferStatus::Running && !row.canCancel
+                ? row.message : transferStatusName(row.status);
         default:
             break;
         }
@@ -72,18 +69,9 @@ QVariant TransferQueueModel::data(const QModelIndex &index, int role) const
                        .arg(path::formatSize(row.bytesDone), path::formatSize(row.bytesTotal));
         return tooltip;
     }
-    case Qt::ForegroundRole:
-        if (column == StatusColumn) {
-            if (row.status == TransferStatus::Failed)
-                return transferStatusColor(row.status);
-            if (row.status == TransferStatus::Completed)
-                return transferStatusColor(row.status);
-            return QColor(QStringLiteral("#8492a6"));
-        }
-        break;
     case Qt::TextAlignmentRole:
         if (column == ProgressColumn || column == SizeColumn || column == SpeedColumn)
-            return static_cast<int>(Qt::AlignLeft | Qt::AlignVCenter);
+            return static_cast<int>(Qt::AlignRight | Qt::AlignVCenter);
         break;
     default:
         break;
@@ -107,11 +95,13 @@ QVariant TransferQueueModel::headerData(int section, Qt::Orientation orientation
             return QStringLiteral("速度");
         case StatusColumn:
             return QStringLiteral("状态");
-        case TargetColumn:
-            return QStringLiteral("目标");
         default:
             break;
         }
+    }
+    if (orientation == Qt::Horizontal && role == Qt::TextAlignmentRole) {
+        const bool numeric = section == ProgressColumn || section == SizeColumn || section == SpeedColumn;
+        return static_cast<int>((numeric ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter);
     }
     return QAbstractTableModel::headerData(section, orientation, role);
 }
@@ -133,33 +123,6 @@ void TransferQueueModel::updateRow(const TransferRow &row)
         return;
     m_rows[index] = row;
     emit dataChanged(this->index(index, 0), this->index(index, ColumnCount - 1));
-    emit rowsChanged();
-}
-
-void TransferQueueModel::removeRow(int id)
-{
-    const int index = rowForId(id);
-    if (index < 0)
-        return;
-    beginRemoveRows(QModelIndex(), index, index);
-    m_rows.removeAt(index);
-    endRemoveRows();
-    rebuildIndex();
-    emit rowsChanged();
-}
-
-void TransferQueueModel::clearFinished()
-{
-    for (int index = m_rows.size() - 1; index >= 0; --index) {
-        const TransferStatus status = m_rows.at(index).status;
-        if (status == TransferStatus::Completed || status == TransferStatus::Failed ||
-            status == TransferStatus::Cancelled) {
-            beginRemoveRows(QModelIndex(), index, index);
-            m_rows.removeAt(index);
-            endRemoveRows();
-        }
-    }
-    rebuildIndex();
     emit rowsChanged();
 }
 
@@ -197,13 +160,6 @@ int TransferQueueModel::activeCount() const
             ++count;
     }
     return count;
-}
-
-void TransferQueueModel::rebuildIndex()
-{
-    m_indexById.clear();
-    for (int index = 0; index < m_rows.size(); ++index)
-        m_indexById.insert(m_rows.at(index).id, index);
 }
 
 } // namespace wsc

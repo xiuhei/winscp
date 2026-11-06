@@ -468,6 +468,51 @@ private slots:
         QCOMPARE(shown, 1);
     }
 
+    void transferWindowShowsOnlyCurrentBatch()
+    {
+        MainWindow window;
+        window.show();
+        auto *queue = window.findChild<QDialog *>(QStringLiteral("TransferQueueWindow"));
+        auto *table = queue->findChild<QTableView *>(QStringLiteral("TransferTable"));
+        auto *transfers = window.findChild<TransferManager *>();
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString target = directory.filePath(QStringLiteral("target"));
+        const SessionData session = SessionData::localSession();
+        const auto missing = [&directory](const QString &name) {
+            FileInfo entry;
+            entry.name = name;
+            entry.path = directory.filePath(name);
+            return entry;
+        };
+        QSignalSpy finished(transfers, &TransferManager::allTransfersFinished);
+        transfers->enqueueDownload(session, {missing(QStringLiteral("missing.txt"))}, target);
+        QTRY_COMPARE(finished.size(), 1);
+        QVERIFY(queue->isVisible());
+        QVERIFY(table->isVisible());
+        QCOMPARE(table->model()->index(0, TransferQueueModel::StatusColumn).data().toString(),
+                 QStringLiteral("失败"));
+        const QString prefix = qEnvironmentVariable("WINSCPQT_UI_PREVIEW");
+        if (!prefix.isEmpty())
+            queue->grab().save(prefix + QStringLiteral("-failed.png"));
+
+        const QString source = directory.filePath(QStringLiteral("current.txt"));
+        QFile file(source);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write("current batch"), 13);
+        file.close();
+        transfers->enqueueDownload(session, {LocalBackend::infoForPath(source)}, target);
+        QCOMPARE(table->model()->rowCount(), 1);
+        QCOMPARE(table->model()->index(0, TransferQueueModel::NameColumn).data().toString(),
+                 QStringLiteral("current.txt"));
+        if (!prefix.isEmpty())
+            queue->grab().save(prefix + QStringLiteral("-current.png"));
+        QTRY_COMPARE(finished.size(), 2);
+        QVERIFY(!queue->isVisible());
+        queue->show();
+        QVERIFY(!table->isVisible());
+    }
+
     void iconsFollowTheme()
     {
         Theme::apply(QStringLiteral("light"));

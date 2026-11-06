@@ -140,15 +140,8 @@ void TransferManager::enqueueUpload(const SessionData &session, const QList<File
     task->preserveTimestamps = Settings::instance().preserveTimestamps;
     task->entries = localEntries;
     task->status = TransferStatus::Queued;
-    m_tasks.append(task);
-    m_byId.insert(task->id, task);
-
-    TransferRow row = rowForTask(task);
-    m_model->addRow(row);
-    emit taskAdded(task->id);
-    emit queueChanged();
     Logger::instance().info(QStringLiteral("已加入上传队列：%1 → %2").arg(task->name, task->targetRoot));
-    startQueued();
+    enqueue(task);
 }
 
 int TransferManager::enqueueDownload(const SessionData &session,
@@ -168,15 +161,25 @@ int TransferManager::enqueueDownload(const SessionData &session,
     task->preserveTimestamps = Settings::instance().preserveTimestamps;
     task->entries = remoteEntries;
     task->status = TransferStatus::Queued;
+    Logger::instance().info(QStringLiteral("已加入下载队列：%1 → %2").arg(task->name, task->targetRoot));
+    enqueue(task);
+    return task->id;
+}
+
+void TransferManager::enqueue(const TaskPtr &task)
+{
+    if (m_activeCount == 0 && pendingCount() == 0 && !m_tasks.isEmpty()) {
+        m_tasks.clear();
+        m_byId.clear();
+        m_model->clearAll();
+    }
     m_tasks.append(task);
     m_byId.insert(task->id, task);
 
     m_model->addRow(rowForTask(task));
     emit taskAdded(task->id);
     emit queueChanged();
-    Logger::instance().info(QStringLiteral("已加入下载队列：%1 → %2").arg(task->name, task->targetRoot));
     startQueued();
-    return task->id;
 }
 
 TransferRow TransferManager::rowForTask(const TaskPtr &task) const
@@ -193,7 +196,8 @@ TransferRow TransferManager::rowForTask(const TaskPtr &task) const
     row.currentFile = task->currentFile;
     row.target = task->targetRoot;
     row.message = task->message;
-    row.canCancel = task->status == TransferStatus::Queued || task->status == TransferStatus::Running;
+    row.canCancel = task->status == TransferStatus::Queued ||
+        (task->status == TransferStatus::Running && !task->cancel.load());
     if (task->status == TransferStatus::Completed && task->skipped > 0 && task->message.isEmpty())
         row.message = QStringLiteral("已完成（跳过 %1 项）").arg(task->skipped.load());
     return row;
@@ -722,16 +726,6 @@ void TransferManager::finishTask(TaskPtr task, TransferStatus status, const QStr
     } else if (status == TransferStatus::Cancelled) {
         Logger::instance().warning(QStringLiteral("传输已取消：%1").arg(task->name));
     }
-    for (int index = 0; m_tasks.size() > 200 && index < m_tasks.size();) {
-        const auto old = m_tasks.at(index);
-        if (old->status == TransferStatus::Queued || old->status == TransferStatus::Running || old == task) {
-            ++index;
-            continue;
-        }
-        m_byId.remove(old->id);
-        m_tasks.removeAt(index);
-        m_model->removeRow(old->id);
-    }
     startQueued();
     if (m_activeCount == 0 && pendingCount() == 0)
         emit allTransfersFinished();
@@ -778,8 +772,7 @@ void TransferManager::cancelTask(int id)
             emit allTransfersFinished();
         return;
     }
-    if (task->status == TransferStatus::Running) {
-        task->cancel.store(true);
+    if (task->status == TransferStatus::Running && !task->cancel.exchange(true)) {
         task->message = QStringLiteral("正在取消…");
         updateTaskRow(task);
         emit taskStateChanged(id);
@@ -792,29 +785,6 @@ void TransferManager::cancelAll()
         if (task->status == TransferStatus::Queued || task->status == TransferStatus::Running)
             cancelTask(task->id);
     }
-}
-
-void TransferManager::clearFinished()
-{
-    for (int index = m_tasks.size() - 1; index >= 0; --index) {
-        const TaskPtr &task = m_tasks.at(index);
-        if (task->status == TransferStatus::Completed || task->status == TransferStatus::Failed ||
-            task->status == TransferStatus::Cancelled) {
-            m_byId.remove(task->id);
-            m_tasks.removeAt(index);
-        }
-    }
-    m_model->clearFinished();
-    emit queueChanged();
-}
-
-void TransferManager::clearAll()
-{
-    cancelAll();
-    m_tasks.clear();
-    m_byId.clear();
-    m_model->clearAll();
-    emit queueChanged();
 }
 
 void TransferManager::shutdown()

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include <QColor>
 #include <QString>
 
 namespace wsc {
@@ -28,7 +27,6 @@ enum class ConflictAction {
 
 QString transferDirectionName(TransferDirection direction);
 QString transferStatusName(TransferStatus status);
-QColor transferStatusColor(TransferStatus status);
 
 struct TransferRow {
     int id = 0;

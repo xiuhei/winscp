@@ -4,7 +4,9 @@
 #include <QWidget>
 
 class QLabel;
+class QStackedLayout;
 class QTableView;
+class QToolButton;
 
 namespace wsc {
 
@@ -16,18 +18,21 @@ class TransferQueueWidget : public QWidget {
 public:
     explicit TransferQueueWidget(TransferManager *manager, QWidget *parent = nullptr);
 
-    void refreshSummary();
-
 private:
     void showContextMenu(const QPoint &position);
+    void showDetails(int id);
     void cancelSelected();
-    void updateEmptyState();
+    void refresh();
+    void updateCancelAction();
 
     TransferManager *m_manager = nullptr;
     TransferQueueModel *m_model = nullptr;
     QTableView *m_table = nullptr;
+    QStackedLayout *m_content = nullptr;
     QLabel *m_summaryLabel = nullptr;
     QLabel *m_emptyLabel = nullptr;
+    QToolButton *m_cancelButton = nullptr;
+    QToolButton *m_cancelAllButton = nullptr;
 };
 
 } // namespace wsc

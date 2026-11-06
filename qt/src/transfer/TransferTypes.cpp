@@ -32,21 +32,4 @@ QString transferStatusName(TransferStatus status)
     return QString();
 }
 
-QColor transferStatusColor(TransferStatus status)
-{
-    switch (status) {
-    case TransferStatus::Queued:
-        return QColor(QStringLiteral("#8492a6"));
-    case TransferStatus::Running:
-        return QColor(QStringLiteral("#e0821c"));
-    case TransferStatus::Completed:
-        return QColor(QStringLiteral("#56c596"));
-    case TransferStatus::Failed:
-        return QColor(QStringLiteral("#e06c75"));
-    case TransferStatus::Cancelled:
-        return QColor(QStringLiteral("#b08a5a"));
-    }
-    return QColor();
-}
-
 } // namespace wsc

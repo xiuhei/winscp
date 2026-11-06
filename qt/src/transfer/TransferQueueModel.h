@@ -19,13 +19,11 @@ public:
         SizeColumn,
         SpeedColumn,
         StatusColumn,
-        TargetColumn,
         ColumnCount,
     };
     enum Role {
         TaskIdRole = Qt::UserRole + 1,
         ProgressRole,
-        StatusRole,
         CanCancelRole,
     };
 
@@ -39,8 +37,6 @@ public:
 
     void addRow(const TransferRow &row);
     void updateRow(const TransferRow &row);
-    void removeRow(int id);
-    void clearFinished();
     void clearAll();
     int rowForId(int id) const;
     TransferRow rowAt(int index) const;
@@ -53,7 +49,6 @@ signals:
 private:
     QVector<TransferRow> m_rows;
     QHash<int, int> m_indexById;
-    void rebuildIndex();
 };
 
 } // namespace wsc

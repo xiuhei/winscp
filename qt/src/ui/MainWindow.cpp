@@ -81,8 +81,9 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_queueDialog = new QDialog(this, Qt::Window);
     m_queueDialog->setObjectName(QStringLiteral("TransferQueueWindow"));
-    m_queueDialog->setWindowTitle(QStringLiteral("传输队列"));
-    m_queueDialog->resize(860, 300);
+    m_queueDialog->setWindowTitle(QStringLiteral("传输进度"));
+    m_queueDialog->setMinimumWidth(560);
+    m_queueDialog->resize(760, 320);
     auto *queueLayout = new QVBoxLayout(m_queueDialog);
     queueLayout->setContentsMargins(0, 0, 0, 0);
     queueLayout->addWidget(new TransferQueueWidget(m_transfers, m_queueDialog));

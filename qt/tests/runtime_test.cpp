@@ -476,7 +476,7 @@ private slots:
         QCOMPARE(model->entryAt(1).name, QStringLiteral("latest.txt"));
     }
 
-    void completedTransferHistoryIsBounded()
+    void transferRowsBelongToCurrentBatch()
     {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
@@ -489,14 +489,19 @@ private slots:
         session.protocol = Protocol::Local;
         const FileInfo entry = LocalBackend::infoForPath(source);
         TransferManager transfers;
-        transfers.setParallelLimit(4);
+        transfers.setParallelLimit(1);
         QSignalSpy finished(&transfers, &TransferManager::allTransfersFinished);
-        for (int index = 0; index < 220; ++index)
-            transfers.enqueueDownload(session, {entry}, directory.filePath(QString::number(index)));
-        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 10000);
-        QVERIFY(transfers.model()->rowCount() <= 200);
+        const int first = transfers.enqueueDownload(session, {entry}, directory.filePath(QStringLiteral("first")));
+        transfers.enqueueDownload(session, {entry}, directory.filePath(QStringLiteral("second")));
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 5000);
+        QCOMPARE(transfers.model()->rowCount(), 2);
         for (const auto &row : transfers.model()->rows())
             QCOMPARE(row.status, TransferStatus::Completed);
+        const int next = transfers.enqueueDownload(session, {entry}, directory.filePath(QStringLiteral("next")));
+        QCOMPARE(transfers.model()->rowCount(), 1);
+        QCOMPARE(transfers.model()->rowForId(first), -1);
+        QCOMPARE(transfers.model()->rowAt(0).id, next);
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 2, 5000);
     }
 
 private:
